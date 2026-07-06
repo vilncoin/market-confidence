@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Market Confidence</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --soft:#20242d; --line:#2a2f3a; --txt:#e7e9ee; --mut:#9aa1b0; --acc:#4f8cff; --up:#2ec16b; --dn:#e2504a; --brand:#c15f3c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--txt); }
+  .wrap { max-width:680px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:18px; font-weight:500; margin:0 0 20px; }
+  select,button { font:inherit; color:var(--txt); background:var(--soft); border:1px solid var(--line); border-radius:8px; padding:8px 10px; cursor:pointer; }
+  .row { display:flex; align-items:center; gap:8px; justify-content:space-between; flex-wrap:wrap; margin-bottom:16px; }
+  .fresh { font-size:12px; color:var(--mut); }
+  .cards { display:grid; grid-template-columns:1.1fr 1fr; gap:12px; margin-bottom:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .lbl { font-size:13px; color:var(--mut); margin:0 0 6px; }
+  .bias { font-size:26px; font-weight:600; margin:0; }
+  .bar { height:8px; background:var(--bg); border-radius:99px; overflow:hidden; flex:1; }
+  .bar > div { height:100%; width:0; background:var(--acc); transition:width .4s; }
+  .reasons div { font-size:13px; line-height:2; }
+  .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:18px; }
+  .metric { background:var(--soft); border-radius:8px; padding:12px 14px; }
+  .metric p:first-child { font-size:12px; color:var(--mut); margin:0; }
+  .metric p:last-child { font-size:17px; font-weight:600; margin:4px 0 0; }
+  .analyze { width:100%; height:46px; background:var(--brand); color:#fff; border:none; border-radius:8px; font-size:15px; font-weight:600; }
+  .analyze:disabled { opacity:.6; }
+  .aiblock { background:var(--soft); border-radius:12px; padding:16px 18px; margin-top:12px; }
+  .aiblock .lbl { text-transform:uppercase; letter-spacing:.04em; font-size:11px; }
+  .post { white-space:pre-wrap; font-size:14px; line-height:1.6; margin:0; }
+  .foot { font-size:11px; color:var(--mut); text-align:center; margin-top:20px; }
+  @media(max-width:560px){ .cards,.metrics{grid-template-columns:1fr 1fr;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Market Confidence</h1>
+  <div class="row">
+    <div style="display:flex; gap:8px;">
+      <select id="symbol">
+        <option value="BTCUSDT">BTC / USDT</option>
+        <option value="ETHUSDT">ETH / USDT</option>
+        <option value="SOLUSDT">SOL / USDT</option>
+      </select>
+      <select id="tf">
+        <option value="15m">15m</option>
+        <option value="1h" selected>1h</option>
+        <option value="4h">4h</option>
+      </select>
+      <button id="refresh">Refresh</button>
+    </div>
+    <span class="fresh" id="fresh">—</span>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <p class="lbl">Current bias</p>
+      <p class="bias" id="bias">—</p>
+      <p class="lbl" style="margin-top:14px;">Confidence</p>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div class="bar"><div id="confbar"></div></div>
+        <span id="conf" style="font-weight:600; min-width:42px; text-align:right;">—</span>
+      </div>
+    </div>
+    <div class="card">
+      <p class="lbl">Reason</p>
+      <div class="reasons" id="reasons"></div>
+    </div>
+  </div>
+
+  <div class="metrics">
+    <div class="metric"><p>Price</p><p id="m-price">—</p></div>
+    <div class="metric"><p>OI change</p><p id="m-oi">—</p></div>
+    <div class="metric"><p>Funding</p><p id="m-fund">—</p></div>
+    <div class="metric"><p>Taker ratio</p><p id="m-taker">—</p></div>
+  </div>
+
+  <button class="analyze" id="analyze">Analyze market</button>
+
+  <div id="ai-out" style="display:none;">
+    <div class="aiblock">
+      <p class="lbl">AI explanation</p>
+      <p class="post" id="ai-text"></p>
+    </div>
+    <div class="aiblock">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <p class="lbl" style="margin:0;">Generated X post</p>
+        <button id="copy" style="padding:4px 10px; font-size:12px;">Copy</button>
+      </div>
+      <p class="post" id="ai-post" style="margin-top:8px;"></p>
+    </div>
+  </div>
+
+  <p class="foot">Live Binance data. Not financial advice.</p>
+</div>
+
+<script>
+let ctx = null;
+
+async function loadMarket(){
+  const symbol = document.getElementById('symbol').value;
+  const period = document.getElementById('tf').value;
+  document.getElementById('bias').textContent = '…';
+  const r = await fetch(`/api/market?symbol=${symbol}&period=${period}`);
+  const { data, bias, error } = await r.json();
+  if (error){ document.getElementById('bias').textContent = 'Error'; console.error(error); return; }
+  ctx = { data, bias };
+
+  const biasEl = document.getElementById('bias');
+  biasEl.textContent = bias.bias;
+  biasEl.style.color = bias.bias==='Bearish'?'var(--dn)':bias.bias==='Bullish'?'var(--up)':'var(--mut)';
+  document.getElementById('conf').textContent = bias.conf + '%';
+  const cb = document.getElementById('confbar');
+  cb.style.width = bias.conf + '%';
+  cb.style.background = bias.bias==='Bearish'?'var(--dn)':bias.bias==='Bullish'?'var(--up)':'var(--mut)';
+
+  document.getElementById('reasons').innerHTML = bias.signals.map(s=>{
+    const ic = s.ok ? '✓' : '✗';
+    const col = s.ok ? 'var(--txt)' : 'var(--mut)';
+    const icol = s.ok ? 'var(--up)' : 'var(--mut)';
+    return `<div style="color:${col}"><span style="color:${icol}">${ic}</span> ${s.label}</div>`;
+  }).join('');
+
+  document.getElementById('fresh').textContent = 'based on last ' + period;
+  document.getElementById('m-price').textContent = '$' + data.price.toLocaleString(undefined,{maximumFractionDigits:2});
+  document.getElementById('m-oi').textContent = (data.oiChangePct>0?'+':'') + data.oiChangePct.toFixed(2) + '%';
+  document.getElementById('m-fund').textContent = (data.funding*100).toFixed(3) + '%';
+  document.getElementById('m-taker').textContent = data.takerRatio.toFixed(2);
+  document.getElementById('ai-out').style.display = 'none';
+}
+
+async function analyze(){
+  if(!ctx) return;
+  const btn = document.getElementById('analyze');
+  btn.disabled = true; btn.textContent = 'Analyzing…';
+  document.getElementById('ai-out').style.display = 'block';
+  document.getElementById('ai-text').textContent = 'Generating…';
+  document.getElementById('ai-post').textContent = '';
+  try {
+    const r = await fetch('/api/analyze', {
+      method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(ctx)
+    });
+    const out = await r.json();
+    if(out.error) throw new Error(out.error);
+    document.getElementById('ai-text').textContent = out.explanation || '';
+    document.getElementById('ai-post').textContent = out.x_post || '';
+  } catch(e){
+    document.getElementById('ai-text').textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Analyze market';
+  }
+}
+
+document.getElementById('symbol').onchange = loadMarket;
+document.getElementById('tf').onchange = loadMarket;
+document.getElementById('refresh').onclick = loadMarket;
+document.getElementById('analyze').onclick = analyze;
+document.getElementById('copy').onclick = function(){
+  navigator.clipboard.writeText(document.getElementById('ai-post').textContent);
+  this.textContent = 'Copied'; setTimeout(()=>this.textContent='Copy',1500);
+};
+loadMarket();
+</script>
+</body>
+</html>
