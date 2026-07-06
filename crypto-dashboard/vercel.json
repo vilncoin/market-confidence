@@ -1,3 +1,9 @@
 {
-  "rewrites": [{ "source": "/", "destination": "/index.html" }]
+  "rewrites": [{ "source": "/", "destination": "/index.html" }],
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 15
+    }
+  },
+  "regions": ["hnd1"]
 }
