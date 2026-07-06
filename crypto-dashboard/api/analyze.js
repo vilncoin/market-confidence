@@ -1,6 +1,6 @@
-// Calls Claude to write the explanation + X post.
-// The bias/confidence/signals are FIXED by the rule engine and passed in.
-// Claude is instructed never to change them — only to explain and phrase.
+// Calls Claude for a detailed analysis. No X post.
+// Bias/confidence/signals are FIXED by the rule engine. Support/resistance
+// levels are computed from REAL candle data and passed in — Claude must not invent numbers.
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
@@ -10,22 +10,31 @@ export default async function handler(req, res) {
 
     const active = bias.signals.filter((s) => s.ok).map((s) => s.label);
     const inactive = bias.signals.filter((s) => !s.ok).map((s) => s.label);
+    const lv = data.levels || {};
 
     const sys =
-      "You are a crypto market analyst writing for a trading dashboard. " +
-      "You are given a FIXED bias, confidence score, and list of satisfied/unsatisfied signals, " +
-      "computed by a deterministic rule engine. You MUST NOT change, recompute, or contradict the bias " +
-      "or confidence number. Only explain the reasoning in natural language and write a short X (Twitter) post. " +
-      "Return ONLY valid JSON, no markdown, no backticks, in the form " +
-      '{"explanation": string, "x_post": string}. ' +
-      "explanation: 2-3 sentences, plain and non-hype. x_post: under 280 characters, no financial advice, " +
-      "include the ticker with a $ prefix and 1-2 hashtags.";
+      "You are a crypto futures analyst writing for a trading dashboard. " +
+      "You are given a FIXED bias, confidence score, satisfied/unsatisfied signals (from a deterministic rule engine), " +
+      "and REAL support/resistance levels computed from candle data. " +
+      "STRICT RULES: (1) Never change or recompute the bias or confidence. " +
+      "(2) Never invent price levels — use ONLY the support/resistance numbers provided. " +
+      "If a level is null, say it is not clearly defined rather than making one up. " +
+      "(3) This is analysis, not financial advice; do not tell the user to buy or sell. " +
+      "Return ONLY valid JSON, no markdown, no backticks, in this exact shape: " +
+      '{"summary": string, "bull_case": string, "bear_case": string, "watch": string}. ' +
+      "summary: 2-3 sentences on the current read. " +
+      "bull_case: 1-2 sentences — what would confirm upside, referencing the resistance level. " +
+      "bear_case: 1-2 sentences — what would confirm downside, referencing the support level. " +
+      "watch: 1-2 sentences on the key thing to monitor next.";
 
     const user =
       `Ticker: ${data.symbol}\nTimeframe: ${data.period}\n` +
       `Price: ${data.price}\n24h change: ${data.priceChangePct}%\n` +
       `OI change: ${data.oiChangePct.toFixed(2)}%\nTaker buy ratio: ${data.takerRatio}\n` +
-      `Funding: ${(data.funding * 100).toFixed(3)}%\n\n` +
+      `Funding: ${(data.funding * 100).toFixed(3)}%\n` +
+      `Nearest support: ${lv.support ?? "not defined"}\n` +
+      `Nearest resistance: ${lv.resistance ?? "not defined"}\n` +
+      `Recent range low: ${lv.recentLow ?? "n/a"}  high: ${lv.recentHigh ?? "n/a"}\n\n` +
       `FIXED bias: ${bias.bias}\nFIXED confidence: ${bias.conf}%\n` +
       `Satisfied signals: ${active.join("; ") || "none"}\n` +
       `Unsatisfied signals: ${inactive.join("; ") || "none"}`;
@@ -38,8 +47,8 @@ export default async function handler(req, res) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001", // cheap + fast; swap to a larger model if you want richer prose
-        max_tokens: 500,
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 800,
         system: sys,
         messages: [{ role: "user", content: user }],
       }),
@@ -52,7 +61,7 @@ export default async function handler(req, res) {
     text = text.replace(/```json|```/g, "").trim();
     let parsed;
     try { parsed = JSON.parse(text); }
-    catch { parsed = { explanation: text, x_post: "" }; }
+    catch { parsed = { summary: text, bull_case: "", bear_case: "", watch: "" }; }
 
     res.status(200).json(parsed);
   } catch (e) {
