@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Market Confidence</title>
+<title>VILN Confidence</title>
 <style>
-  :root { --bg:#0f1115; --card:#181b22; --soft:#20242d; --line:#2a2f3a; --txt:#e7e9ee; --mut:#9aa1b0; --acc:#4f8cff; --up:#2ec16b; --dn:#e2504a; --brand:#c15f3c; }
+  :root { --bg:#0a0d0a; --card:#141a14; --soft:#1b231b; --line:#2a352a; --txt:#e7f0e7; --mut:#8fa08f; --acc:#5fd35f; --up:#3ecf6b; --dn:#e2504a; --brand:#4caf3c; --viln:#6fdc5f; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--txt); }
   .wrap { max-width:680px; margin:0 auto; padding:24px 16px 48px; }
@@ -35,7 +35,10 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Market Confidence</h1>
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
+    <h1 style="margin:0; letter-spacing:0.5px;">VILN <span style="color:var(--viln);">CONFIDENCE</span></h1>
+  </div>
+  <p style="color:var(--mut); font-size:13px; margin:0 0 20px;">Real-time futures signals for the VILN network.</p>
   <div class="row">
     <div style="display:flex; gap:8px;">
       <select id="symbol">
@@ -74,8 +77,15 @@
     <div class="metric"><p>OI change</p><p id="m-oi">—</p></div>
     <div class="metric"><p>Funding</p><p id="m-fund">—</p></div>
     <div class="metric"><p>Taker ratio</p><p id="m-taker">—</p></div>
-    <div class="metric"><p>Support</p><p id="m-sup">—</p></div>
-    <div class="metric"><p>Resistance</p><p id="m-res">—</p></div>
+  </div>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:18px;">
+    <div class="metric" style="border-left:3px solid var(--up);">
+      <p>Support</p><p id="m-sup">—</p>
+    </div>
+    <div class="metric" style="border-left:3px solid var(--dn);">
+      <p>Resistance</p><p id="m-res">—</p>
+    </div>
   </div>
 
   <button class="analyze" id="analyze">Analyze market</button>
@@ -99,7 +109,34 @@
     </div>
   </div>
 
-  <p class="foot">Live Binance data. Not financial advice.</p>
+  <div style="margin-top:2rem; padding-top:1.5rem; border-top:1px solid var(--line);">
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px;">
+      <a href="https://pump.fun/coin/8TE24cDPjHHeh8BntbmFAiNFJR9kC7qjEdDArwyfpump" target="_blank" rel="noopener"
+         style="display:flex; align-items:center; justify-content:center; gap:8px; height:46px; background:var(--brand); color:#fff; border-radius:8px; text-decoration:none; font-weight:600; font-size:14px;">
+        Buy $VILN
+      </a>
+      <a href="https://dexscreener.com/solana/3ojbowk4hg7uotjmywquwpipnfhtvqyrhgjys7w6ajue" target="_blank" rel="noopener"
+         style="display:flex; align-items:center; justify-content:center; gap:8px; height:46px; background:var(--soft); color:var(--txt); border:1px solid var(--line); border-radius:8px; text-decoration:none; font-weight:500; font-size:14px;">
+        Chart
+      </a>
+      <a href="https://x.com/VILNcoin" target="_blank" rel="noopener"
+         style="display:flex; align-items:center; justify-content:center; gap:8px; height:46px; background:var(--soft); color:var(--txt); border:1px solid var(--line); border-radius:8px; text-decoration:none; font-weight:500; font-size:14px;">
+        X / Twitter
+      </a>
+    </div>
+
+    <div style="margin-top:1.25rem; background:var(--card); border:1px solid var(--brand); border-radius:12px; padding:1.25rem 1.25rem; text-align:center;">
+      <p style="font-size:16px; font-weight:600; color:var(--viln); margin:0 0 8px;">Support the project</p>
+      <p style="font-size:13px; color:var(--txt); margin:0 0 16px; line-height:1.7;">Every contribution is used transparently for development costs and $VILN marketing.</p>
+      <p style="font-size:11px; color:var(--mut); margin:0 0 6px; text-transform:uppercase; letter-spacing:0.05em;">SOL Wallet</p>
+      <div style="display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap;">
+        <span id="sol-addr" style="font-size:13px; color:var(--viln); word-break:break-all; font-family:monospace;">FHCGciuhzwKWBzmamkE4oXfcwEA5fivdgDvDgEkcJehV</span>
+        <button id="sol-copy" style="padding:4px 12px; font-size:12px; background:var(--soft); color:var(--txt); border:1px solid var(--line); border-radius:6px; cursor:pointer;">Copy</button>
+      </div>
+    </div>
+
+    <p class="foot" style="margin-top:1.25rem;">Live Binance data. For information only — not financial advice.</p>
+  </div>
 </div>
 
 <script>
@@ -170,6 +207,14 @@ document.getElementById('symbol').onchange = loadMarket;
 document.getElementById('tf').onchange = loadMarket;
 document.getElementById('refresh').onclick = loadMarket;
 document.getElementById('analyze').onclick = analyze;
+var solBtn = document.getElementById('sol-copy');
+if(solBtn){
+  solBtn.onclick = function(){
+    navigator.clipboard.writeText(document.getElementById('sol-addr').textContent.trim());
+    this.textContent = 'Copied'; var self=this;
+    setTimeout(function(){ self.textContent='Copy'; }, 1500);
+  };
+}
 loadMarket();
 </script>
 </body>
