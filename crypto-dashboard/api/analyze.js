@@ -1,53 +1,94 @@
-// Calls Claude for a flowing analyst report (English, no section headers).
-// Bias/confidence/signals are FIXED by the rule engine. Levels and squeeze are
-// computed from real data and passed in — Claude must not invent numbers or change the verdict.
+// Multi-timeframe synthesis report.
+// Server fetches 15m, 1h, 4h itself, runs the rule engine on each (fixed verdicts),
+// blends them (4h weighted highest), then Claude writes ONE flowing English report.
+// Claude never changes the numbers — it only synthesizes and explains.
+
+import { fetchMarket, computeBias } from "./engine.js";
+
+const FRAMES = [
+  { period: "15m", weight: 1, label: "15m" },
+  { period: "1h", weight: 2, label: "1h" },
+  { period: "4h", weight: 3, label: "4h" },
+];
+
+function biasScore(bias) {
+  // Signed contribution: bullish positive, bearish negative, scaled by confidence.
+  const sign = bias.bias === "Bullish" ? 1 : bias.bias === "Bearish" ? -1 : 0;
+  return sign * (bias.conf / 100);
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   try {
-    const { data, bias } = req.body || {};
-    if (!data || !bias) return res.status(400).json({ error: "Missing data/bias" });
+    const symbol = ((req.body && req.body.symbol) || "BTCUSDT").toUpperCase();
 
-    const active = bias.signals.filter((s) => s.ok).map((s) => s.label);
-    const inactive = bias.signals.filter((s) => !s.ok).map((s) => s.label);
-    const lv = data.levels || {};
-    const fl = data.flow || {};
-    const bk = data.book || {};
-    const sq = data.squeeze || {};
+    // Fetch + evaluate all three timeframes in parallel.
+    const results = await Promise.all(
+      FRAMES.map(async (f) => {
+        const data = await fetchMarket(symbol, f.period);
+        const bias = computeBias(data);
+        return { ...f, data, bias };
+      })
+    );
+
+    // Weighted blended verdict. 4h dominates the trend.
+    let weighted = 0, weightSum = 0;
+    for (const r of results) {
+      weighted += biasScore(r.bias) * r.weight;
+      weightSum += r.weight;
+    }
+    const net = weighted / weightSum; // -1..1
+    let mtfBias = net > 0.12 ? "Bullish" : net < -0.12 ? "Bearish" : "Neutral";
+    let mtfConf = Math.round(Math.abs(net) * 100);
+    if (mtfBias === "Neutral") mtfConf = Math.min(mtfConf, 20);
+    else mtfConf = Math.max(mtfConf, 35);
+
+    // Alignment: do all three agree?
+    const dirs = results.map((r) => r.bias.bias);
+    const allSame = dirs.every((d) => d === dirs[0]) && dirs[0] !== "Neutral";
+    const alignment = allSame
+      ? "aligned"
+      : dirs.filter((d) => d === "Bullish").length && dirs.filter((d) => d === "Bearish").length
+      ? "conflicting"
+      : "mixed";
+
+    // Build compact per-frame context for the model.
+    const frameLines = results.map((r) => {
+      const d = r.data, b = r.bias, fl = d.flow || {}, lv = d.levels || {}, bk = d.book || {}, sq = d.squeeze || {};
+      const active = b.signals.filter((s) => s.ok).map((s) => s.label).join("; ") || "none";
+      return (
+        `[${r.label}] verdict: ${b.bias} ${b.conf}% | ` +
+        `price ${d.price}, OIΔ ${d.oiChangePct.toFixed(2)}%, funding ${(d.funding * 100).toFixed(3)}%, ` +
+        `taker ${d.takerRatio}, L/S ${d.longShort ?? "n/a"}, book ${bk.label ?? "n/a"}, ` +
+        `CVD ${fl.cvdTrend ?? "n/a"}, divergence ${fl.divergence ?? "none"}/${fl.swing ?? "none"}, ` +
+        `squeeze ${sq.type ?? "none"}, support ${lv.support ?? "n/a"}, resistance ${lv.resistance ?? "n/a"} | ` +
+        `signals: ${active}`
+      );
+    });
 
     const sys =
-      "You are a professional crypto futures analyst writing a concise market report in English. " +
-      "You are given a FIXED verdict (bias + confidence) and a FIXED list of satisfied signals from a " +
-      "deterministic rule engine, plus REAL price levels and order-flow data. " +
+      "You are a professional crypto futures analyst writing ONE concise multi-timeframe market report in English. " +
+      "You are given FIXED per-timeframe verdicts (15m, 1h, 4h) and a FIXED blended verdict from a deterministic rule engine, " +
+      "plus real price levels and order-flow data for each timeframe. " +
       "STRICT RULES: " +
-      "(1) Do NOT change, soften, or recompute the bias or confidence — state them as settled facts and write with conviction. " +
-      "(2) Do NOT invent any numbers — use ONLY the price levels, ratios, and values provided; if a value is missing, omit it. " +
-      "(3) Liquidation/squeeze info is an ESTIMATE derived from OI and CVD, not a real liquidation feed — if you mention it, phrase it as an estimate. " +
-      "(4) This is market analysis, not financial advice; do not instruct the reader to buy or sell. " +
+      "(1) Do NOT change or recompute any verdict or confidence — treat them as settled and write with conviction. " +
+      "(2) Do NOT invent numbers — use only the values provided; omit anything missing. " +
+      "(3) Treat the 4h as the dominant trend, 1h as the intermediate structure, 15m as the short-term/timing read. " +
+      "(4) Squeeze/liquidation info is an ESTIMATE from OI and CVD, not a real feed — phrase it as an estimate if used. " +
+      "(5) Market analysis, not financial advice; do not tell the reader to buy or sell. " +
       "FORMAT: Return ONLY valid JSON, no markdown, no backticks: {\"report\": string}. " +
       "The report is 2-3 short paragraphs of flowing prose, NO headings, NO bullet points. " +
-      "Paragraph 1: the current read and why (bias, confidence, the key signals driving it). " +
-      "Paragraph 2: positioning and order flow (OI, CVD/delta, funding, long/short, order book, squeeze estimate). " +
-      "Paragraph 3: the levels that matter (support/resistance) and what would confirm continuation or reversal. " +
-      "Write decisively and cleanly, like a desk analyst briefing a trader.";
+      "Open with the blended verdict and whether the timeframes are aligned or conflicting. " +
+      "Then explain how 4h, 1h and 15m relate (trend vs pullback vs timing). " +
+      "Close with the key levels that would confirm continuation or flip the read. " +
+      "Write decisively, like a desk analyst briefing a trader.";
 
     const user =
-      `Ticker: ${data.symbol}\nTimeframe: ${data.period}\n` +
-      `Price: ${data.price}\n24h change: ${data.priceChangePct}%\n` +
-      `OI change: ${data.oiChangePct.toFixed(2)}%\nTaker buy ratio: ${data.takerRatio}\n` +
-      `Funding: ${(data.funding * 100).toFixed(3)}%\n` +
-      `Long/Short account ratio: ${data.longShort ?? "n/a"}\n` +
-      `Order book: ${bk.label ?? "n/a"}${bk.ratio != null ? " (bid/ask " + bk.ratio + ")" : ""}\n` +
-      `Last-candle delta: ${fl.lastDelta ?? "n/a"} (positive = buyers dominant)\n` +
-      `CVD trend: ${fl.cvdTrend ?? "n/a"}; price trend: ${fl.priceTrend ?? "n/a"}; ` +
-      `trend divergence: ${fl.divergence ?? "none"}; swing divergence: ${fl.swing ?? "none"}\n` +
-      `Squeeze estimate: ${sq.type ?? "none"}${sq.note ? " — " + sq.note : ""}\n` +
-      `Nearest support: ${lv.support ?? "not defined"}\n` +
-      `Nearest resistance: ${lv.resistance ?? "not defined"}\n` +
-      `Recent range low: ${lv.recentLow ?? "n/a"}  high: ${lv.recentHigh ?? "n/a"}\n\n` +
-      `FIXED VERDICT: ${bias.bias} at ${bias.conf}% confidence\n` +
-      `Satisfied signals: ${active.join("; ") || "none"}\n` +
-      `Unsatisfied signals: ${inactive.join("; ") || "none"}`;
+      `Ticker: ${symbol}\n` +
+      `BLENDED VERDICT: ${mtfBias} at ${mtfConf}% confidence\n` +
+      `Timeframe alignment: ${alignment}\n\n` +
+      `Per-timeframe (4h is dominant):\n` +
+      frameLines.join("\n");
 
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -58,7 +99,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 900,
+        max_tokens: 1000,
         system: sys,
         messages: [{ role: "user", content: user }],
       }),
@@ -73,7 +114,11 @@ export default async function handler(req, res) {
     try { parsed = JSON.parse(text); }
     catch { parsed = { report: text }; }
 
-    res.status(200).json(parsed);
+    // Return the blended verdict too, so the UI can show it above the report.
+    res.status(200).json({
+      report: parsed.report || "",
+      mtf: { bias: mtfBias, conf: mtfConf, alignment, frames: dirs },
+    });
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
   }
