@@ -69,14 +69,27 @@ export default async function handler(req, res) {
     else if (mtfBias === "Bearish") invalidation = domLv.recentHigh ?? resistance;
     else invalidation = support;
 
-    // Verdict: the decision. Conflicting or weak => WAIT.
+    // Detect high-risk conditions across timeframes: active squeeze or extreme crowding.
+    const anySqueeze = results.some((r) => {
+      const t = (r.data.squeeze || {}).type;
+      return t === "long_squeeze" || t === "short_squeeze";
+    });
+    const extremeCrowd = results.some((r) => {
+      const ls = r.data.longShort;
+      return ls != null && (ls > 2.5 || ls < 0.5);
+    });
+    const highRisk = anySqueeze || extremeCrowd;
+
+    // Verdict: HIGH RISK checked first (safety over direction), then direction, else WAIT.
     let verdict, verdictColor;
-    if (alignment === "conflicting" || mtfConf < 30) {
+    if (highRisk) {
+      verdict = "HIGH RISK"; verdictColor = "orange";
+    } else if (alignment === "conflicting" || mtfConf < 30) {
       verdict = "WAIT"; verdictColor = "yellow";
     } else if (mtfBias === "Bullish") {
-      verdict = "BUY DIP"; verdictColor = "green";
+      verdict = "BUY"; verdictColor = "green";
     } else if (mtfBias === "Bearish") {
-      verdict = "SELL RIP"; verdictColor = "red";
+      verdict = "SELL"; verdictColor = "red";
     } else {
       verdict = "WAIT"; verdictColor = "yellow";
     }
