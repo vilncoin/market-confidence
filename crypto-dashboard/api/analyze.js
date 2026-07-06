@@ -78,13 +78,18 @@ export default async function handler(req, res) {
       const ls = r.data.longShort;
       return ls != null && (ls > 2.5 || ls < 0.5);
     });
-    const highRisk = anySqueeze || extremeCrowd;
+    const danger = anySqueeze || extremeCrowd;
+    const highRisk = danger && mtfConf >= 40;
 
-    // Verdict: HIGH RISK checked first (safety over direction), then direction, else WAIT.
+    // Verdict priority:
+    // 1) HIGH RISK — danger with real conviction.
+    // 2) WAIT — conflicting, low conviction, OR any danger that isn't strong enough for HIGH RISK
+    //    (never recommend BUY/SELL while a squeeze/crowd is present).
+    // 3) BUY / SELL — clean aligned direction with no danger.
     let verdict, verdictColor;
     if (highRisk) {
       verdict = "HIGH RISK"; verdictColor = "orange";
-    } else if (alignment === "conflicting" || mtfConf < 30) {
+    } else if (danger || alignment === "conflicting" || mtfConf < 30) {
       verdict = "WAIT"; verdictColor = "yellow";
     } else if (mtfBias === "Bullish") {
       verdict = "BUY"; verdictColor = "green";
