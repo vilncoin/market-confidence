@@ -24,11 +24,12 @@ async function j(url) {
 // Pull the raw market signals we need for one symbol/timeframe.
 export async function fetchMarket(symbol, period) {
   // period must be one of Binance's: 5m,15m,30m,1h,2h,4h,6h,12h,1d
-  const [ticker, oiHist, taker, fundingArr] = await Promise.all([
+  const [ticker, oiHist, taker, fundingArr, klines] = await Promise.all([
     j(`${FAPI}/fapi/v1/ticker/24hr?symbol=${symbol}`),
     j(`${FAPI}/futures/data/openInterestHist?symbol=${symbol}&period=${period}&limit=2`),
     j(`${FAPI}/futures/data/takerlongshortRatio?symbol=${symbol}&period=${period}&limit=1`),
     j(`${FAPI}/fapi/v1/fundingRate?symbol=${symbol}&limit=1`),
+    j(`${FAPI}/fapi/v1/klines?symbol=${symbol}&interval=${period}&limit=50`),
   ]);
 
   const price = parseFloat(ticker.lastPrice);
@@ -49,7 +50,37 @@ export async function fetchMarket(symbol, period) {
   const funding =
     Array.isArray(fundingArr) && fundingArr.length ? parseFloat(fundingArr[0].fundingRate) : 0;
 
-  return { symbol, period, price, priceChangePct, oiChangePct, takerRatio, funding };
+  // Support/resistance from real candles. kline[2]=high, kline[3]=low.
+  const levels = computeLevels(klines, price);
+
+  return { symbol, period, price, priceChangePct, oiChangePct, takerRatio, funding, levels };
+}
+
+// Real support/resistance from recent candle highs/lows. No guessing.
+// Nearest resistance = lowest recent high above price. Nearest support = highest recent low below price.
+function computeLevels(klines, price) {
+  if (!Array.isArray(klines) || !klines.length) return { support: null, resistance: null, recentHigh: null, recentLow: null };
+  const highs = klines.map((k) => parseFloat(k[2])).filter((n) => !isNaN(n));
+  const lows = klines.map((k) => parseFloat(k[3])).filter((n) => !isNaN(n));
+  const recentHigh = Math.max(...highs);
+  const recentLow = Math.min(...lows);
+  const highsAbove = highs.filter((h) => h > price).sort((a, b) => a - b);
+  const lowsBelow = lows.filter((l) => l < price).sort((a, b) => b - a);
+  const resistance = highsAbove.length ? highsAbove[0] : recentHigh;
+  const support = lowsBelow.length ? lowsBelow[0] : recentLow;
+  return {
+    support: round(support),
+    resistance: round(resistance),
+    recentHigh: round(recentHigh),
+    recentLow: round(recentLow),
+  };
+}
+
+function round(n) {
+  if (n == null) return null;
+  if (n >= 1000) return Math.round(n);
+  if (n >= 1) return Math.round(n * 100) / 100;
+  return Math.round(n * 10000) / 10000;
 }
 
 // Deterministic rule engine. AI never touches these numbers.
