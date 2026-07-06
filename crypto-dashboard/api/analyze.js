@@ -11,6 +11,7 @@ export default async function handler(req, res) {
     const active = bias.signals.filter((s) => s.ok).map((s) => s.label);
     const inactive = bias.signals.filter((s) => !s.ok).map((s) => s.label);
     const lv = data.levels || {};
+    const fl = data.flow || {};
 
     const sys =
       "You are a crypto futures analyst writing for a trading dashboard. " +
@@ -22,7 +23,7 @@ export default async function handler(req, res) {
       "(3) This is analysis, not financial advice; do not tell the user to buy or sell. " +
       "Return ONLY valid JSON, no markdown, no backticks, in this exact shape: " +
       '{"summary": string, "bull_case": string, "bear_case": string, "watch": string}. ' +
-      "summary: 2-3 sentences on the current read. " +
+      "summary: 2-3 sentences on the current read, mentioning order flow (delta/CVD) when it is meaningful. " +
       "bull_case: 1-2 sentences — what would confirm upside, referencing the resistance level. " +
       "bear_case: 1-2 sentences — what would confirm downside, referencing the support level. " +
       "watch: 1-2 sentences on the key thing to monitor next.";
@@ -34,7 +35,10 @@ export default async function handler(req, res) {
       `Funding: ${(data.funding * 100).toFixed(3)}%\n` +
       `Nearest support: ${lv.support ?? "not defined"}\n` +
       `Nearest resistance: ${lv.resistance ?? "not defined"}\n` +
-      `Recent range low: ${lv.recentLow ?? "n/a"}  high: ${lv.recentHigh ?? "n/a"}\n\n` +
+      `Recent range low: ${lv.recentLow ?? "n/a"}  high: ${lv.recentHigh ?? "n/a"}\n` +
+      `Last-candle delta: ${fl.lastDelta ?? "n/a"} (positive = buyers dominant)\n` +
+      `CVD trend: ${fl.cvdTrend ?? "n/a"}; price trend: ${fl.priceTrend ?? "n/a"}; ` +
+      `divergence: ${fl.divergence ?? "none"}\n\n` +
       `FIXED bias: ${bias.bias}\nFIXED confidence: ${bias.conf}%\n` +
       `Satisfied signals: ${active.join("; ") || "none"}\n` +
       `Unsatisfied signals: ${inactive.join("; ") || "none"}`;
