@@ -105,7 +105,7 @@
   <div id="ai-out" style="display:none;">
     <!-- Verdict -->
     <div id="verdict-box" class="aiblock" style="text-align:center; padding:1.25rem;">
-      <p class="lbl" style="margin:0 0 6px;">AI Verdict</p>
+      <p class="lbl" style="margin:0 0 6px;">VILN Verdict</p>
       <p id="v-verdict" style="font-size:28px; font-weight:700; margin:0;">—</p>
       <div style="display:flex; justify-content:center; gap:24px; margin-top:12px;">
         <div><p style="font-size:11px; color:var(--mut); margin:0;">Bias</p><p id="v-bias" style="font-size:14px; font-weight:600; margin:2px 0 0;">—</p></div>
@@ -260,8 +260,8 @@ async function analyze(){
     if(out.error) throw new Error(out.error);
 
     // Verdict
-    var vColors = { green:'var(--up)', red:'var(--dn)', yellow:'#e2b93b' };
-    var vEmoji = { green:'🟢', red:'🔴', yellow:'🟡' };
+    var vColors = { green:'var(--up)', red:'var(--dn)', yellow:'#e2b93b', orange:'#e8833a' };
+    var vEmoji = { green:'🟢', red:'🔴', yellow:'🟡', orange:'⚠' };
     var vc = vColors[out.verdictColor] || 'var(--txt)';
     var vEl = document.getElementById('v-verdict');
     vEl.textContent = (vEmoji[out.verdictColor]||'') + ' ' + out.verdict;
