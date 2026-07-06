@@ -74,21 +74,28 @@
     <div class="metric"><p>OI change</p><p id="m-oi">—</p></div>
     <div class="metric"><p>Funding</p><p id="m-fund">—</p></div>
     <div class="metric"><p>Taker ratio</p><p id="m-taker">—</p></div>
+    <div class="metric"><p>Support</p><p id="m-sup">—</p></div>
+    <div class="metric"><p>Resistance</p><p id="m-res">—</p></div>
   </div>
 
   <button class="analyze" id="analyze">Analyze market</button>
 
   <div id="ai-out" style="display:none;">
     <div class="aiblock">
-      <p class="lbl">AI explanation</p>
-      <p class="post" id="ai-text"></p>
+      <p class="lbl">Summary</p>
+      <p class="post" id="ai-sum"></p>
+    </div>
+    <div class="aiblock" style="border-left:3px solid var(--up);">
+      <p class="lbl">Bull case</p>
+      <p class="post" id="ai-bull"></p>
+    </div>
+    <div class="aiblock" style="border-left:3px solid var(--dn);">
+      <p class="lbl">Bear case</p>
+      <p class="post" id="ai-bear"></p>
     </div>
     <div class="aiblock">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <p class="lbl" style="margin:0;">Generated X post</p>
-        <button id="copy" style="padding:4px 10px; font-size:12px;">Copy</button>
-      </div>
-      <p class="post" id="ai-post" style="margin-top:8px;"></p>
+      <p class="lbl">What to watch</p>
+      <p class="post" id="ai-watch"></p>
     </div>
   </div>
 
@@ -127,6 +134,9 @@ async function loadMarket(){
   document.getElementById('m-oi').textContent = (data.oiChangePct>0?'+':'') + data.oiChangePct.toFixed(2) + '%';
   document.getElementById('m-fund').textContent = (data.funding*100).toFixed(3) + '%';
   document.getElementById('m-taker').textContent = data.takerRatio.toFixed(2);
+  const lv = data.levels || {};
+  document.getElementById('m-sup').textContent = lv.support != null ? '$' + lv.support.toLocaleString() : '—';
+  document.getElementById('m-res').textContent = lv.resistance != null ? '$' + lv.resistance.toLocaleString() : '—';
   document.getElementById('ai-out').style.display = 'none';
 }
 
@@ -135,18 +145,22 @@ async function analyze(){
   const btn = document.getElementById('analyze');
   btn.disabled = true; btn.textContent = 'Analyzing…';
   document.getElementById('ai-out').style.display = 'block';
-  document.getElementById('ai-text').textContent = 'Generating…';
-  document.getElementById('ai-post').textContent = '';
+  document.getElementById('ai-sum').textContent = 'Generating…';
+  document.getElementById('ai-bull').textContent = '';
+  document.getElementById('ai-bear').textContent = '';
+  document.getElementById('ai-watch').textContent = '';
   try {
     const r = await fetch('/api/analyze', {
       method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(ctx)
     });
     const out = await r.json();
     if(out.error) throw new Error(out.error);
-    document.getElementById('ai-text').textContent = out.explanation || '';
-    document.getElementById('ai-post').textContent = out.x_post || '';
+    document.getElementById('ai-sum').textContent = out.summary || '';
+    document.getElementById('ai-bull').textContent = out.bull_case || '';
+    document.getElementById('ai-bear').textContent = out.bear_case || '';
+    document.getElementById('ai-watch').textContent = out.watch || '';
   } catch(e){
-    document.getElementById('ai-text').textContent = 'Error: ' + e.message;
+    document.getElementById('ai-sum').textContent = 'Error: ' + e.message;
   } finally {
     btn.disabled = false; btn.textContent = 'Analyze market';
   }
@@ -156,10 +170,6 @@ document.getElementById('symbol').onchange = loadMarket;
 document.getElementById('tf').onchange = loadMarket;
 document.getElementById('refresh').onclick = loadMarket;
 document.getElementById('analyze').onclick = analyze;
-document.getElementById('copy').onclick = function(){
-  navigator.clipboard.writeText(document.getElementById('ai-post').textContent);
-  this.textContent = 'Copied'; setTimeout(()=>this.textContent='Copy',1500);
-};
 loadMarket();
 </script>
 </body>
