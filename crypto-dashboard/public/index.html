@@ -92,26 +92,20 @@
     <div class="metric">
       <p>CVD trend</p><p id="m-cvd">—</p>
     </div>
+    <div class="metric">
+      <p>Long/Short</p><p id="m-ls">—</p>
+    </div>
+    <div class="metric">
+      <p>Order book</p><p id="m-book">—</p>
+    </div>
   </div>
 
   <button class="analyze" id="analyze">Analyze market</button>
 
   <div id="ai-out" style="display:none;">
     <div class="aiblock">
-      <p class="lbl">Summary</p>
-      <p class="post" id="ai-sum"></p>
-    </div>
-    <div class="aiblock" style="border-left:3px solid var(--up);">
-      <p class="lbl">Bull case</p>
-      <p class="post" id="ai-bull"></p>
-    </div>
-    <div class="aiblock" style="border-left:3px solid var(--dn);">
-      <p class="lbl">Bear case</p>
-      <p class="post" id="ai-bear"></p>
-    </div>
-    <div class="aiblock">
-      <p class="lbl">What to watch</p>
-      <p class="post" id="ai-watch"></p>
+      <p class="lbl">Market report</p>
+      <div class="post" id="ai-report" style="white-space:pre-wrap;"></div>
     </div>
   </div>
 
@@ -191,11 +185,25 @@ async function loadMarket(){
   var cEl = document.getElementById('m-cvd');
   if (fl.cvdTrend) {
     var arrow = fl.cvdTrend === 'up' ? '▲ Rising' : fl.cvdTrend === 'down' ? '▼ Falling' : 'Flat';
-    if (fl.divergence === 'bearish') arrow += ' ⚠';
-    if (fl.divergence === 'bullish') arrow += ' ⚠';
+    if (fl.divergence === 'bearish' || fl.swing === 'bearish') arrow += ' ⚠';
+    if (fl.divergence === 'bullish' || fl.swing === 'bullish') arrow += ' ⚠';
     cEl.textContent = arrow;
     cEl.style.color = fl.cvdTrend === 'up' ? 'var(--up)' : fl.cvdTrend === 'down' ? 'var(--dn)' : 'var(--txt)';
   } else { cEl.textContent = '—'; }
+
+  var lsEl = document.getElementById('m-ls');
+  if (data.longShort != null) {
+    lsEl.textContent = data.longShort.toFixed(2);
+    lsEl.style.color = data.longShort > 2 ? 'var(--dn)' : data.longShort < 0.6 ? 'var(--up)' : 'var(--txt)';
+  } else { lsEl.textContent = '—'; }
+
+  var bkEl = document.getElementById('m-book');
+  var bk = data.book || {};
+  if (bk.label && bk.label !== 'n/a') {
+    var bkTxt = bk.label === 'bid-heavy' ? '▲ Bid-heavy' : bk.label === 'ask-heavy' ? '▼ Ask-heavy' : 'Balanced';
+    bkEl.textContent = bkTxt;
+    bkEl.style.color = bk.label === 'bid-heavy' ? 'var(--up)' : bk.label === 'ask-heavy' ? 'var(--dn)' : 'var(--txt)';
+  } else { bkEl.textContent = '—'; }
 
   document.getElementById('ai-out').style.display = 'none';
 }
@@ -205,22 +213,16 @@ async function analyze(){
   const btn = document.getElementById('analyze');
   btn.disabled = true; btn.textContent = 'Analyzing…';
   document.getElementById('ai-out').style.display = 'block';
-  document.getElementById('ai-sum').textContent = 'Generating…';
-  document.getElementById('ai-bull').textContent = '';
-  document.getElementById('ai-bear').textContent = '';
-  document.getElementById('ai-watch').textContent = '';
+  document.getElementById('ai-report').textContent = 'Generating report…';
   try {
     const r = await fetch('/api/analyze', {
       method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(ctx)
     });
     const out = await r.json();
     if(out.error) throw new Error(out.error);
-    document.getElementById('ai-sum').textContent = out.summary || '';
-    document.getElementById('ai-bull').textContent = out.bull_case || '';
-    document.getElementById('ai-bear').textContent = out.bear_case || '';
-    document.getElementById('ai-watch').textContent = out.watch || '';
+    document.getElementById('ai-report').textContent = out.report || '';
   } catch(e){
-    document.getElementById('ai-sum').textContent = 'Error: ' + e.message;
+    document.getElementById('ai-report').textContent = 'Error: ' + e.message;
   } finally {
     btn.disabled = false; btn.textContent = 'Analyze market';
   }
