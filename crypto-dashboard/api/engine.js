@@ -53,7 +53,60 @@ export async function fetchMarket(symbol, period) {
   // Support/resistance from real candles. kline[2]=high, kline[3]=low.
   const levels = computeLevels(klines, price);
 
-  return { symbol, period, price, priceChangePct, oiChangePct, takerRatio, funding, levels };
+  // Delta / CVD from candle taker-buy vs total volume.
+  const flow = computeDelta(klines);
+
+  return { symbol, period, price, priceChangePct, oiChangePct, takerRatio, funding, levels, flow };
+}
+
+// Delta = taker buy - taker sell per candle. CVD = running sum of delta.
+// kline[5] = total base volume, kline[9] = taker buy base volume.
+function computeDelta(klines) {
+  if (!Array.isArray(klines) || !klines.length) {
+    return { lastDelta: 0, cvd: 0, cvdTrend: "flat", priceTrend: "flat", divergence: "none" };
+  }
+  let cvd = 0;
+  const cvdSeries = [];
+  const closes = [];
+  for (const k of klines) {
+    const vol = parseFloat(k[5]) || 0;
+    const takerBuy = parseFloat(k[9]) || 0;
+    const takerSell = vol - takerBuy;
+    const delta = takerBuy - takerSell; // >0 buyers dominant, <0 sellers dominant
+    cvd += delta;
+    cvdSeries.push(cvd);
+    closes.push(parseFloat(k[4]) || 0);
+  }
+  const n = klines.length;
+  const lastDelta = (() => {
+    const k = klines[n - 1];
+    const vol = parseFloat(k[5]) || 0;
+    const takerBuy = parseFloat(k[9]) || 0;
+    return takerBuy - (vol - takerBuy);
+  })();
+
+  // Compare recent window (last ~10 candles) start vs end for trend direction.
+  const w = Math.min(10, n);
+  const cvdStart = cvdSeries[n - w];
+  const cvdEnd = cvdSeries[n - 1];
+  const priceStart = closes[n - w];
+  const priceEnd = closes[n - 1];
+
+  const cvdTrend = cvdEnd > cvdStart ? "up" : cvdEnd < cvdStart ? "down" : "flat";
+  const priceTrend = priceEnd > priceStart ? "up" : priceEnd < priceStart ? "down" : "flat";
+
+  // Divergence: price and CVD disagree.
+  let divergence = "none";
+  if (priceTrend === "up" && cvdTrend === "down") divergence = "bearish";   // price up, buyers not backing it
+  else if (priceTrend === "down" && cvdTrend === "up") divergence = "bullish"; // price down, buyers accumulating
+
+  return {
+    lastDelta: Math.round(lastDelta),
+    cvd: Math.round(cvdEnd),
+    cvdTrend,
+    priceTrend,
+    divergence,
+  };
 }
 
 // Real support/resistance from recent candle highs/lows. No guessing.
@@ -105,6 +158,14 @@ export function computeBias(d) {
   // funding is a decimal fraction: 0.0001 = 0.01%. Typical is 0.0001; >0.0005 (0.05%) is hot.
   const fundingOverheated = Math.abs(d.funding) > 0.0005;
   add("Funding not overheated", true, !fundingOverheated, 1);
+
+  // CVD divergence: strong signal. Only added when a divergence actually exists.
+  const flow = d.flow || {};
+  if (flow.divergence === "bearish") {
+    add("Bearish CVD divergence (buyers not confirming)", false, true, 3);
+  } else if (flow.divergence === "bullish") {
+    add("Bullish CVD divergence (accumulation on dips)", true, true, 3);
+  }
 
   const net = score;
   let bias = net < 0 ? "Bearish" : net > 0 ? "Bullish" : "Neutral";
