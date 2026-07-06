@@ -86,6 +86,12 @@
     <div class="metric" style="border-left:3px solid var(--dn);">
       <p>Resistance</p><p id="m-res">—</p>
     </div>
+    <div class="metric">
+      <p>Delta (last)</p><p id="m-delta">—</p>
+    </div>
+    <div class="metric">
+      <p>CVD trend</p><p id="m-cvd">—</p>
+    </div>
   </div>
 
   <button class="analyze" id="analyze">Analyze market</button>
@@ -174,6 +180,23 @@ async function loadMarket(){
   const lv = data.levels || {};
   document.getElementById('m-sup').textContent = lv.support != null ? '$' + lv.support.toLocaleString() : '—';
   document.getElementById('m-res').textContent = lv.resistance != null ? '$' + lv.resistance.toLocaleString() : '—';
+
+  var fl = data.flow || {};
+  var dEl = document.getElementById('m-delta');
+  if (fl.lastDelta != null) {
+    dEl.textContent = (fl.lastDelta > 0 ? '+' : '') + fl.lastDelta.toLocaleString();
+    dEl.style.color = fl.lastDelta > 0 ? 'var(--up)' : fl.lastDelta < 0 ? 'var(--dn)' : 'var(--txt)';
+  } else { dEl.textContent = '—'; }
+
+  var cEl = document.getElementById('m-cvd');
+  if (fl.cvdTrend) {
+    var arrow = fl.cvdTrend === 'up' ? '▲ Rising' : fl.cvdTrend === 'down' ? '▼ Falling' : 'Flat';
+    if (fl.divergence === 'bearish') arrow += ' ⚠';
+    if (fl.divergence === 'bullish') arrow += ' ⚠';
+    cEl.textContent = arrow;
+    cEl.style.color = fl.cvdTrend === 'up' ? 'var(--up)' : fl.cvdTrend === 'down' ? 'var(--dn)' : 'var(--txt)';
+  } else { cEl.textContent = '—'; }
+
   document.getElementById('ai-out').style.display = 'none';
 }
 
