@@ -24,12 +24,14 @@ async function j(url) {
 // Pull the raw market signals we need for one symbol/timeframe.
 export async function fetchMarket(symbol, period) {
   // period must be one of Binance's: 5m,15m,30m,1h,2h,4h,6h,12h,1d
-  const [ticker, oiHist, taker, fundingArr, klines] = await Promise.all([
+  const [ticker, oiHist, taker, fundingArr, klines, lsRatio, depth] = await Promise.all([
     j(`${FAPI}/fapi/v1/ticker/24hr?symbol=${symbol}`),
     j(`${FAPI}/futures/data/openInterestHist?symbol=${symbol}&period=${period}&limit=2`),
     j(`${FAPI}/futures/data/takerlongshortRatio?symbol=${symbol}&period=${period}&limit=1`),
     j(`${FAPI}/fapi/v1/fundingRate?symbol=${symbol}&limit=1`),
     j(`${FAPI}/fapi/v1/klines?symbol=${symbol}&interval=${period}&limit=50`),
+    j(`${FAPI}/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=1`),
+    j(`${FAPI}/fapi/v1/depth?symbol=${symbol}&limit=100`),
   ]);
 
   const price = parseFloat(ticker.lastPrice);
@@ -56,7 +58,55 @@ export async function fetchMarket(symbol, period) {
   // Delta / CVD from candle taker-buy vs total volume.
   const flow = computeDelta(klines);
 
-  return { symbol, period, price, priceChangePct, oiChangePct, takerRatio, funding, levels, flow };
+  // Long/Short account ratio. >1 means more accounts long.
+  const longShort =
+    Array.isArray(lsRatio) && lsRatio.length ? parseFloat(lsRatio[0].longShortRatio) : null;
+
+  // Order book imbalance: bid depth vs ask depth near the top of book.
+  const book = computeBookImbalance(depth);
+
+  // Squeeze estimate from OI + price + CVD (no real liquidation feed on free REST).
+  const squeeze = estimateSqueeze(oiChangePct, priceChangePct, flow);
+
+  return {
+    symbol, period, price, priceChangePct, oiChangePct, takerRatio, funding,
+    levels, flow, longShort, book, squeeze,
+  };
+}
+
+// Bid/ask depth imbalance. Returns ratio (>1 = more bids/buy support) and a label.
+function computeBookImbalance(depth) {
+  if (!depth || !Array.isArray(depth.bids) || !Array.isArray(depth.asks)) {
+    return { ratio: null, label: "n/a" };
+  }
+  const sum = (rows) => rows.reduce((a, r) => a + (parseFloat(r[1]) || 0), 0);
+  const bidVol = sum(depth.bids);
+  const askVol = sum(depth.asks);
+  if (askVol === 0) return { ratio: null, label: "n/a" };
+  const ratio = bidVol / askVol;
+  let label = "balanced";
+  if (ratio > 1.3) label = "bid-heavy";       // buy support stacked
+  else if (ratio < 0.77) label = "ask-heavy"; // sell pressure stacked
+  return { ratio: Math.round(ratio * 100) / 100, label };
+}
+
+// Infer likely squeeze from OI change + price move + CVD direction.
+// No real liquidation data on free REST, so this is an estimate, labeled as such.
+function estimateSqueeze(oiChangePct, priceChangePct, flow) {
+  const cvdDown = flow && flow.cvdTrend === "down";
+  const cvdUp = flow && flow.cvdTrend === "up";
+  // OI falling = positions being closed/forced out.
+  if (oiChangePct < -1.5 && priceChangePct < -0.5 && cvdDown) {
+    return { type: "long_squeeze", note: "OI dropping into a falling market — likely long liquidations" };
+  }
+  if (oiChangePct < -1.5 && priceChangePct > 0.5 && cvdUp) {
+    return { type: "short_squeeze", note: "OI dropping into a rising market — likely short liquidations" };
+  }
+  // OI rising while price flat = leverage building, squeeze risk both ways.
+  if (oiChangePct > 2 && Math.abs(priceChangePct) < 0.8) {
+    return { type: "leverage_building", note: "OI rising without price move — leverage building, volatility risk" };
+  }
+  return { type: "none", note: "" };
 }
 
 // Delta = taker buy - taker sell per candle. CVD = running sum of delta.
@@ -201,6 +251,33 @@ export function computeBias(d) {
     add("Bearish divergence at highs (lower CVD high)", false, true, 3);
   } else if (flow.swing === "bullish") {
     add("Bullish divergence at lows (higher CVD low)", true, true, 3);
+  }
+
+  // Order book imbalance.
+  const book = d.book || {};
+  if (book.label === "ask-heavy") {
+    add("Order book ask-heavy (sell walls stacked)", false, true, 2);
+  } else if (book.label === "bid-heavy") {
+    add("Order book bid-heavy (buy support stacked)", true, true, 2);
+  }
+
+  // Long/short crowding: extreme long crowding is a contrarian bearish risk (squeeze fuel).
+  if (d.longShort != null) {
+    if (d.longShort > 2.0) {
+      add("Crowded longs (squeeze risk)", false, true, 2);
+    } else if (d.longShort < 0.6) {
+      add("Crowded shorts (squeeze risk)", true, true, 2);
+    }
+  }
+
+  // Squeeze estimate from OI/price/CVD.
+  const sq = d.squeeze || {};
+  if (sq.type === "long_squeeze") {
+    add("Long squeeze in progress (est.)", false, true, 3);
+  } else if (sq.type === "short_squeeze") {
+    add("Short squeeze in progress (est.)", true, true, 3);
+  } else if (sq.type === "leverage_building") {
+    add("Leverage building — volatility ahead (est.)", false, true, 1);
   }
 
   const net = score;
