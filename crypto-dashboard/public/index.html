@@ -104,7 +104,10 @@
 
   <div id="ai-out" style="display:none;">
     <div class="aiblock">
-      <p class="lbl">Market report</p>
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+        <p class="lbl" style="margin:0;">Market report</p>
+        <div id="mtf-badge" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
+      </div>
       <div class="post" id="ai-report" style="white-space:pre-wrap;"></div>
     </div>
   </div>
@@ -213,14 +216,30 @@ async function analyze(){
   const btn = document.getElementById('analyze');
   btn.disabled = true; btn.textContent = 'Analyzing…';
   document.getElementById('ai-out').style.display = 'block';
-  document.getElementById('ai-report').textContent = 'Generating report…';
+  document.getElementById('ai-report').textContent = 'Generating multi-timeframe report…';
+  document.getElementById('mtf-badge').innerHTML = '';
   try {
+    var symbol = document.getElementById('symbol').value;
     const r = await fetch('/api/analyze', {
-      method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(ctx)
+      method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ symbol: symbol })
     });
     const out = await r.json();
     if(out.error) throw new Error(out.error);
     document.getElementById('ai-report').textContent = out.report || '';
+
+    var mtf = out.mtf;
+    if (mtf) {
+      var col = mtf.bias === 'Bearish' ? 'var(--dn)' : mtf.bias === 'Bullish' ? 'var(--up)' : 'var(--mut)';
+      var alignTxt = mtf.alignment === 'aligned' ? '✓ aligned' : mtf.alignment === 'conflicting' ? '⚠ conflicting' : 'mixed';
+      var chips = (mtf.frames || []).map(function(d, i){
+        var lbls = ['15m','1h','4h'];
+        var c = d === 'Bearish' ? 'var(--dn)' : d === 'Bullish' ? 'var(--up)' : 'var(--mut)';
+        return '<span style="padding:2px 6px; border-radius:4px; background:var(--soft); color:'+c+'; font-size:11px;">'+lbls[i]+' '+d.charAt(0)+'</span>';
+      }).join(' ');
+      document.getElementById('mtf-badge').innerHTML =
+        '<span style="font-weight:600; color:'+col+';">'+mtf.bias+' '+mtf.conf+'%</span>' +
+        '<span style="color:var(--mut);">· '+alignTxt+'</span> ' + chips;
+    }
   } catch(e){
     document.getElementById('ai-report').textContent = 'Error: ' + e.message;
   } finally {
