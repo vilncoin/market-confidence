@@ -103,12 +103,43 @@
   <button class="analyze" id="analyze">Analyze market</button>
 
   <div id="ai-out" style="display:none;">
-    <div class="aiblock">
-      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-        <p class="lbl" style="margin:0;">Market report</p>
-        <div id="mtf-badge" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
+    <!-- Verdict -->
+    <div id="verdict-box" class="aiblock" style="text-align:center; padding:1.25rem;">
+      <p class="lbl" style="margin:0 0 6px;">AI Verdict</p>
+      <p id="v-verdict" style="font-size:28px; font-weight:700; margin:0;">—</p>
+      <div style="display:flex; justify-content:center; gap:24px; margin-top:12px;">
+        <div><p style="font-size:11px; color:var(--mut); margin:0;">Bias</p><p id="v-bias" style="font-size:14px; font-weight:600; margin:2px 0 0;">—</p></div>
+        <div><p style="font-size:11px; color:var(--mut); margin:0;">Confidence</p><p id="v-conf" style="font-size:14px; font-weight:600; margin:2px 0 0;">—</p></div>
+        <div><p style="font-size:11px; color:var(--mut); margin:0;">Timeframes</p><p id="v-align" style="font-size:14px; font-weight:600; margin:2px 0 0;">—</p></div>
       </div>
-      <div class="post" id="ai-report" style="white-space:pre-wrap;"></div>
+    </div>
+
+    <!-- Multi-timeframe -->
+    <div class="aiblock">
+      <p class="lbl">Multi-Timeframe</p>
+      <div id="v-frames" style="display:flex; gap:10px;"></div>
+    </div>
+
+    <!-- Why -->
+    <div class="aiblock">
+      <p class="lbl">Why?</p>
+      <ul id="v-why" style="margin:0; padding-left:18px; font-size:14px; line-height:1.8;"></ul>
+    </div>
+
+    <!-- Key levels -->
+    <div class="aiblock">
+      <p class="lbl">Key Levels</p>
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; font-size:14px;">
+        <div><p style="font-size:11px; color:var(--mut); margin:0;">Support</p><p id="v-sup" style="color:var(--up); font-weight:600; margin:2px 0 0;">—</p></div>
+        <div><p style="font-size:11px; color:var(--mut); margin:0;">Resistance</p><p id="v-res" style="color:var(--dn); font-weight:600; margin:2px 0 0;">—</p></div>
+        <div><p style="font-size:11px; color:var(--mut); margin:0;">Invalidation</p><p id="v-inv" style="color:var(--mut); font-weight:600; margin:2px 0 0;">—</p></div>
+      </div>
+    </div>
+
+    <!-- Summary -->
+    <div class="aiblock">
+      <p class="lbl">Summary</p>
+      <p class="post" id="v-summary" style="margin:0;"></p>
     </div>
   </div>
 
@@ -216,8 +247,10 @@ async function analyze(){
   const btn = document.getElementById('analyze');
   btn.disabled = true; btn.textContent = 'Analyzing…';
   document.getElementById('ai-out').style.display = 'block';
-  document.getElementById('ai-report').textContent = 'Generating multi-timeframe report…';
-  document.getElementById('mtf-badge').innerHTML = '';
+  document.getElementById('v-verdict').textContent = '…';
+  document.getElementById('v-summary').textContent = 'Analyzing all timeframes…';
+  document.getElementById('v-why').innerHTML = '';
+  document.getElementById('v-frames').innerHTML = '';
   try {
     var symbol = document.getElementById('symbol').value;
     const r = await fetch('/api/analyze', {
@@ -225,23 +258,46 @@ async function analyze(){
     });
     const out = await r.json();
     if(out.error) throw new Error(out.error);
-    document.getElementById('ai-report').textContent = out.report || '';
 
-    var mtf = out.mtf;
-    if (mtf) {
-      var col = mtf.bias === 'Bearish' ? 'var(--dn)' : mtf.bias === 'Bullish' ? 'var(--up)' : 'var(--mut)';
-      var alignTxt = mtf.alignment === 'aligned' ? '✓ aligned' : mtf.alignment === 'conflicting' ? '⚠ conflicting' : 'mixed';
-      var chips = (mtf.frames || []).map(function(d, i){
-        var lbls = ['15m','1h','4h'];
-        var c = d === 'Bearish' ? 'var(--dn)' : d === 'Bullish' ? 'var(--up)' : 'var(--mut)';
-        return '<span style="padding:2px 6px; border-radius:4px; background:var(--soft); color:'+c+'; font-size:11px;">'+lbls[i]+' '+d.charAt(0)+'</span>';
-      }).join(' ');
-      document.getElementById('mtf-badge').innerHTML =
-        '<span style="font-weight:600; color:'+col+';">'+mtf.bias+' '+mtf.conf+'%</span>' +
-        '<span style="color:var(--mut);">· '+alignTxt+'</span> ' + chips;
-    }
+    // Verdict
+    var vColors = { green:'var(--up)', red:'var(--dn)', yellow:'#e2b93b' };
+    var vEmoji = { green:'🟢', red:'🔴', yellow:'🟡' };
+    var vc = vColors[out.verdictColor] || 'var(--txt)';
+    var vEl = document.getElementById('v-verdict');
+    vEl.textContent = (vEmoji[out.verdictColor]||'') + ' ' + out.verdict;
+    vEl.style.color = vc;
+    document.getElementById('verdict-box').style.borderColor = vc;
+
+    document.getElementById('v-bias').textContent = out.biasLabel || '—';
+    document.getElementById('v-conf').textContent = (out.conf != null ? out.conf + '%' : '—');
+    var alignTxt = out.alignment === 'aligned' ? '✓ Aligned' : out.alignment === 'conflicting' ? '⚠ Conflicting' : 'Mixed';
+    document.getElementById('v-align').textContent = alignTxt;
+
+    // Multi-timeframe
+    document.getElementById('v-frames').innerHTML = (out.frames || []).map(function(f){
+      var c = f.dir === 'Bearish' ? 'var(--dn)' : f.dir === 'Bullish' ? 'var(--up)' : 'var(--mut)';
+      var dot = f.dir === 'Bearish' ? '🔴' : f.dir === 'Bullish' ? '🟢' : '🟡';
+      return '<div style="flex:1; text-align:center; background:var(--soft); border-radius:8px; padding:10px 6px;">' +
+             '<p style="font-size:12px; color:var(--mut); margin:0;">'+f.tf+'</p>' +
+             '<p style="font-size:13px; font-weight:600; color:'+c+'; margin:4px 0 0;">'+dot+' '+f.dir+'</p></div>';
+    }).join('');
+
+    // Why
+    document.getElementById('v-why').innerHTML = (out.why || []).map(function(w){
+      return '<li>'+w+'</li>';
+    }).join('') || '<li style="list-style:none; color:var(--mut);">—</li>';
+
+    // Levels
+    var lv = out.levels || {};
+    document.getElementById('v-sup').textContent = lv.support != null ? '$'+Number(lv.support).toLocaleString() : '—';
+    document.getElementById('v-res').textContent = lv.resistance != null ? '$'+Number(lv.resistance).toLocaleString() : '—';
+    document.getElementById('v-inv').textContent = lv.invalidation != null ? '$'+Number(lv.invalidation).toLocaleString() : '—';
+
+    // Summary
+    document.getElementById('v-summary').textContent = out.summary || '';
   } catch(e){
-    document.getElementById('ai-report').textContent = 'Error: ' + e.message;
+    document.getElementById('v-verdict').textContent = 'Error';
+    document.getElementById('v-summary').textContent = e.message;
   } finally {
     btn.disabled = false; btn.textContent = 'Analyze market';
   }
