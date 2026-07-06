@@ -63,7 +63,7 @@ export async function fetchMarket(symbol, period) {
 // kline[5] = total base volume, kline[9] = taker buy base volume.
 function computeDelta(klines) {
   if (!Array.isArray(klines) || !klines.length) {
-    return { lastDelta: 0, cvd: 0, cvdTrend: "flat", priceTrend: "flat", divergence: "none" };
+    return { lastDelta: 0, cvd: 0, cvdTrend: "flat", priceTrend: "flat", divergence: "none", swing: "none" };
   }
   let cvd = 0;
   const cvdSeries = [];
@@ -100,13 +100,42 @@ function computeDelta(klines) {
   if (priceTrend === "up" && cvdTrend === "down") divergence = "bearish";   // price up, buyers not backing it
   else if (priceTrend === "down" && cvdTrend === "up") divergence = "bullish"; // price down, buyers accumulating
 
+  // Swing divergence at extremes: compare the two most recent halves' price low/high vs CVD low/high.
+  // Bullish: price makes a lower low but CVD makes a higher low (selling pressure fading at the bottom).
+  // Bearish: price makes a higher high but CVD makes a lower high (buying pressure fading at the top).
+  const swing = computeSwingDivergence(closes, cvdSeries);
+
   return {
     lastDelta: Math.round(lastDelta),
     cvd: Math.round(cvdEnd),
     cvdTrend,
     priceTrend,
     divergence,
+    swing,
   };
+}
+
+// Split the recent window into two halves; compare price extreme vs CVD extreme.
+function computeSwingDivergence(closes, cvdSeries) {
+  const n = closes.length;
+  const win = Math.min(20, n);
+  if (win < 8) return "none";
+  const seg = win >> 1; // half window
+  const p1 = closes.slice(n - win, n - seg);
+  const p2 = closes.slice(n - seg, n);
+  const c1 = cvdSeries.slice(n - win, n - seg);
+  const c2 = cvdSeries.slice(n - seg, n);
+
+  const pLow1 = Math.min(...p1), pLow2 = Math.min(...p2);
+  const pHigh1 = Math.max(...p1), pHigh2 = Math.max(...p2);
+  const cLow1 = Math.min(...c1), cLow2 = Math.min(...c2);
+  const cHigh1 = Math.max(...c1), cHigh2 = Math.max(...c2);
+
+  // Bullish: recent price low is lower, but recent CVD low is higher (not confirming the new low).
+  if (pLow2 < pLow1 && cLow2 > cLow1) return "bullish";
+  // Bearish: recent price high is higher, but recent CVD high is lower (not confirming the new high).
+  if (pHigh2 > pHigh1 && cHigh2 < cHigh1) return "bearish";
+  return "none";
 }
 
 // Real support/resistance from recent candle highs/lows. No guessing.
@@ -165,6 +194,13 @@ export function computeBias(d) {
     add("Bearish CVD divergence (buyers not confirming)", false, true, 3);
   } else if (flow.divergence === "bullish") {
     add("Bullish CVD divergence (accumulation on dips)", true, true, 3);
+  }
+
+  // Swing divergence at support/resistance: strongest reversal cue. Only added when present.
+  if (flow.swing === "bearish") {
+    add("Bearish divergence at highs (lower CVD high)", false, true, 3);
+  } else if (flow.swing === "bullish") {
+    add("Bullish divergence at lows (higher CVD low)", true, true, 3);
   }
 
   const net = score;
