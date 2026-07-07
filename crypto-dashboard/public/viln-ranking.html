@@ -251,8 +251,10 @@
 
   // Seed tokens to pull. DexScreener's public search/pairs endpoints are keyless.
   // We search a few Solana-relevant terms and merge unique pairs.
-  var SEARCH_TERMS = ["SOL","BONK","WIF","PUMP","VILN","POPCAT","MEW","GIGA","MOODENG","PNUT"];
+  var SEARCH_TERMS = ["BONK","WIF","POPCAT","MEW","GIGA","MOODENG","PNUT","VILN","FARTCOIN","AI16Z"];
   var CHAIN = "solana";
+  // Symbols to exclude from the board (majors / infra tokens, case-insensitive)
+  var EXCLUDE = ["SOL","WSOL","PUMP","USDC","USDT","JUP","RAY","JLP","MSOL","JITOSOL","BSOL"];
 
   // ─────────────────────────────────────────────
   // State
@@ -283,24 +285,22 @@
 
   function loadAll(){
     return Promise.all(SEARCH_TERMS.map(fetchTerm)).then(function(lists){
-      // Merge all pairs, then collapse to one row per TOKEN (not per pool).
-      // A token can trade in many pools; we sum volume/txns across its pools
-      // and keep the deepest-liquidity pool as the representative row.
+      // Step 1 — collapse to one row per TOKEN address (sum flow across its pools).
       var byToken = {};
       lists.forEach(function(pairs){
         pairs.forEach(function(p){
           if(!p || p.chainId !== CHAIN) return;
           var tokenAddr = p.baseToken && p.baseToken.address;
           if(!tokenAddr) return;
+          var sym = ((p.baseToken && p.baseToken.symbol) || "").toUpperCase();
+          if(EXCLUDE.indexOf(sym) > -1) return;           // drop majors/infra
           var n = normalize(p);
           var cur = byToken[tokenAddr];
           if(!cur){
             byToken[tokenAddr] = n;
           } else {
-            // aggregate flow metrics across pools
             cur.vol += n.vol;
             cur.tx  += n.tx;
-            // representative pool = deepest liquidity (price, chg, link, liq from it)
             if(n.liq > cur.liq){
               cur.liq = n.liq; cur.chg = n.chg; cur.price = n.price;
               cur.url = n.url; cur.addr = n.addr;
@@ -309,7 +309,19 @@
           }
         });
       });
-      return Object.keys(byToken).map(function(k){ return byToken[k]; });
+
+      // Step 2 — collapse impostors: same SYMBOL, different address → keep the
+      // deepest-liquidity one only (the real token), drop the copycats.
+      var bySym = {};
+      Object.keys(byToken).forEach(function(k){
+        var t = byToken[k];
+        var key = t.sym.toUpperCase();
+        if(!bySym[key] || t.liq > bySym[key].liq){
+          bySym[key] = t;
+        }
+      });
+
+      return Object.keys(bySym).map(function(k){ return bySym[k]; });
     });
   }
 
