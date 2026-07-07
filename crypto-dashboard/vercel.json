@@ -5,5 +5,16 @@
       "maxDuration": 15
     }
   },
-  "regions": ["hnd1"]
+  "regions": ["hnd1"],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'self' https://viln.fun https://*.viln.fun https://*.netlify.app"
+        }
+      ]
+    }
+  ]
 }
