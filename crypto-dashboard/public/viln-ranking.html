@@ -251,7 +251,12 @@
 
   // Seed tokens to pull. DexScreener's public search/pairs endpoints are keyless.
   // We search a few Solana-relevant terms and merge unique pairs.
-  var SEARCH_TERMS = ["BONK","WIF","POPCAT","MEW","GIGA","MOODENG","PNUT","VILN","FARTCOIN","AI16Z"];
+  var SEARCH_TERMS = [
+    "BONK","WIF","POPCAT","MEW","GIGA","MOODENG","PNUT","VILN","FARTCOIN","AI16Z",
+    "GOAT","CHILLGUY","ACT","PENGU","TRUMP","MELANIA","BODEN","MICHI","BOME","SLERF",
+    "MYRO","WEN","SILLY","MUMU","RETARDIO","BILLY","SC","DADDY","LOCKIN","HARAMBE",
+    "SPX","MOTHER","GME","FWOG","MANEKI","PONKE","NPC","SMOG","ANALOS","USA"
+  ];
   var CHAIN = "solana";
   // Symbols to exclude from the board (majors / infra tokens, case-insensitive)
   var EXCLUDE = ["SOL","WSOL","PUMP","USDC","USDT","JUP","RAY","JLP","MSOL","JITOSOL","BSOL"];
@@ -283,8 +288,22 @@
       .catch(function(){ return []; });
   }
 
+  function fetchInBatches(terms, size){
+    var out = [];
+    var chunks = [];
+    for(var i=0;i<terms.length;i+=size) chunks.push(terms.slice(i,i+size));
+    return chunks.reduce(function(chain, chunk){
+      return chain.then(function(){
+        return Promise.all(chunk.map(fetchTerm)).then(function(res){
+          out = out.concat(res);
+          return new Promise(function(r){ setTimeout(r, 120); }); // brief pause
+        });
+      });
+    }, Promise.resolve()).then(function(){ return out; });
+  }
+
   function loadAll(){
-    return Promise.all(SEARCH_TERMS.map(fetchTerm)).then(function(lists){
+    return fetchInBatches(SEARCH_TERMS, 8).then(function(lists){
       // Step 1 — collapse to one row per TOKEN address (sum flow across its pools).
       var byToken = {};
       lists.forEach(function(pairs){
