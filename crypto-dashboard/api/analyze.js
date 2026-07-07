@@ -128,16 +128,21 @@ export default async function handler(req, res) {
 
     const sys =
       "You are a professional crypto futures analyst. A deterministic rule engine has ALREADY decided the verdict, " +
-      "bias, timeframe alignment, and key levels. Your ONLY job is to write two things: a few short 'why' bullets and a brief summary. " +
+      "bias, timeframe alignment, and key levels. Your job is to write the 'why' bullets, a brief summary, and a detailed report. " +
       "STRICT RULES: " +
       "(1) Do NOT change the verdict, bias, confidence, or levels. Do NOT restate the numbers you're given except where natural. " +
       "(2) Do NOT invent numbers. " +
       "(3) Squeeze/liquidation info is an ESTIMATE from OI and CVD — phrase as estimate if used. " +
       "(4) Analysis, not financial advice. " +
-      "FORMAT: Return ONLY valid JSON, no markdown, no backticks: {\"why\": string[], \"summary\": string}. " +
+      "FORMAT: Return ONLY valid JSON, no markdown, no backticks: {\"why\": string[], \"summary\": string, \"detailed\": string}. " +
       "why: 3-4 very short bullet strings (max ~10 words each), each naming ONE concrete driver, ideally tied to a timeframe " +
       "(e.g. '4H squeeze setup building', '1H bearish CVD divergence', '15m lacks confirmation'). " +
-      "summary: 2-3 sentences, plain and decisive, on why this is the right stance right now. No headings, no bullets in the summary.";
+      "summary: 2-3 sentences, plain and decisive, on why this is the right stance right now. No headings, no bullets in the summary. " +
+      "detailed: a thorough multi-paragraph report (4-6 short paragraphs) for readers who want depth. " +
+      "Walk through each timeframe (4h dominant trend, 1h intermediate structure, 15m timing) and how they interact, " +
+      "then interpret the order flow (OI, CVD/delta, funding, long/short, order book) and any squeeze estimate, " +
+      "and finally discuss the key levels and what price action would confirm or invalidate the read. " +
+      "Use \\n\\n between paragraphs. No markdown headings, no bullet symbols — flowing prose only. Decisive desk-analyst tone.";
 
     const user =
       `Ticker: ${symbol}\n` +
@@ -155,7 +160,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 1000,
+        max_tokens: 1600,
         system: sys,
         messages: [{ role: "user", content: user }],
       }),
@@ -168,7 +173,7 @@ export default async function handler(req, res) {
     text = text.replace(/```json|```/g, "").trim();
     let parsed;
     try { parsed = JSON.parse(text); }
-    catch { parsed = { why: [], summary: text }; }
+    catch { parsed = { why: [], summary: text, detailed: "" }; }
 
     res.status(200).json({
       verdict, verdictColor,
@@ -177,6 +182,7 @@ export default async function handler(req, res) {
       levels: { support, resistance, invalidation },
       why: Array.isArray(parsed.why) ? parsed.why : [],
       summary: parsed.summary || "",
+      detailed: parsed.detailed || "",
     });
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
