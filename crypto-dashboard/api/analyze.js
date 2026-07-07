@@ -4,6 +4,7 @@
 // Claude never changes the numbers — it only synthesizes and explains.
 
 import { fetchMarket, computeBias } from "./engine.js";
+import { checkGate, MIN_VILN } from "./gate.js";
 
 const FRAMES = [
   { period: "15m", weight: 1, label: "15m" },
@@ -21,6 +22,18 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   try {
     const symbol = ((req.body && req.body.symbol) || "BTCUSDT").toUpperCase();
+
+    // --- VILN token gate: verify wallet ownership + balance before analyzing ---
+    const auth = (req.body && req.body.auth) || {};
+    const gate = await checkGate(auth);
+    if (!gate.ok) {
+      return res.status(403).json({
+        error: "gated",
+        reason: gate.reason,
+        balance: gate.balance ?? null,
+        required: MIN_VILN,
+      });
+    }
 
     // Fetch + evaluate all three timeframes in parallel.
     const results = await Promise.all(
