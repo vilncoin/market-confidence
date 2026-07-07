@@ -35,20 +35,19 @@
 </head>
 <body>
 <div class="wrap">
-  <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
-    <h1 style="margin:0; letter-spacing:0.5px;">VILN <span style="color:var(--viln);">CONFIDENCE</span></h1>
-  </div>
-  <p style="color:var(--mut); font-size:13px; margin:0 0 16px;">Real-time futures signals for the VILN network.</p>
-
-  <div id="wallet-bar" style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:16px; flex-wrap:wrap; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px;">
-    <button id="connect" style="height:40px; padding:0 16px; background:var(--soft); color:var(--txt); border:1px solid var(--viln); border-radius:8px; font-weight:600; cursor:pointer;">
-      Connect Phantom
-    </button>
-    <div style="text-align:right;">
-      <div id="wallet-balance" style="font-size:14px; font-weight:600; color:var(--txt);"></div>
-      <span id="wallet-status" style="font-size:12px; color:var(--mut);">1,000 VILN required to unlock analysis</span>
+  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+    <div>
+      <h1 style="margin:0; letter-spacing:0.5px;">VILN <span style="color:var(--viln);">CONFIDENCE</span></h1>
+      <p style="color:var(--mut); font-size:13px; margin:6px 0 0;">Real-time futures signals for the VILN network.</p>
+    </div>
+    <div id="wallet-bar" style="text-align:right; flex-shrink:0;">
+      <button id="connect" style="height:40px; padding:0 16px; background:var(--soft); color:var(--txt); border:1px solid var(--viln); border-radius:8px; font-weight:600; cursor:pointer; white-space:nowrap;">
+        Connect Phantom
+      </button>
+      <div id="wallet-note" style="font-size:12px; color:var(--mut); margin-top:6px; display:none;"></div>
     </div>
   </div>
+
   <div class="row">
     <div style="display:flex; gap:8px;">
       <select id="symbol">
@@ -196,49 +195,63 @@ function getProvider(){
 
 async function connectWallet(){
   const p = getProvider();
-  const status = document.getElementById('wallet-status');
+  const note = document.getElementById('wallet-note');
   if (!p){
-    status.textContent = 'Phantom not found — install the Phantom extension.';
+    note.style.display = 'block';
+    note.style.color = 'var(--mut)';
+    note.textContent = 'Phantom not found — install the Phantom extension.';
     window.open('https://phantom.app/', '_blank');
     return;
   }
   try {
     const resp = await p.connect();
     wallet.address = resp.publicKey.toString();
-    var short = wallet.address.slice(0,4) + '…' + wallet.address.slice(-4);
-    document.getElementById('connect').textContent = short;
-    status.textContent = 'Reading VILN balance…';
-    status.style.color = 'var(--mut)';
+    document.getElementById('connect').textContent = 'Reading balance…';
     await refreshBalance();
   } catch(e){
-    status.textContent = 'Connection cancelled.';
+    var note0 = document.getElementById('wallet-note');
+    note0.style.display = 'block';
+    note0.textContent = 'Connection cancelled.';
+    note0.style.color = 'var(--mut)';
   }
 }
 
-// Fetch and display the wallet's VILN balance (public, no signature needed).
+// Compact number: 27980493 -> "27.9M", 1234 -> "1.2K"
+function compactNum(n){
+  if (n >= 1e9) return (n/1e9).toFixed(1).replace(/\.0$/,'') + 'B';
+  if (n >= 1e6) return (n/1e6).toFixed(1).replace(/\.0$/,'') + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1).replace(/\.0$/,'') + 'K';
+  return String(Math.round(n));
+}
+
+// Fetch the wallet's VILN balance (public) and fold it into the connect button.
 async function refreshBalance(){
-  const status = document.getElementById('wallet-status');
-  const balEl = document.getElementById('wallet-balance');
+  const btn = document.getElementById('connect');
+  const note = document.getElementById('wallet-note');
   if (!wallet.address) return;
+  var short = wallet.address.slice(0,4) + '…' + wallet.address.slice(-4);
   try {
     const r = await fetch('/api/balance?address=' + encodeURIComponent(wallet.address));
     const out = await r.json();
     if (out.error) throw new Error(out.error);
     wallet.balance = out.balance;
-    balEl.textContent = out.balance.toLocaleString() + ' VILN';
-    balEl.style.color = out.eligible ? 'var(--viln)' : 'var(--dn)';
     if (out.eligible){
-      status.textContent = '✓ Eligible — click Analyze';
-      status.style.color = 'var(--viln)';
+      btn.textContent = short + ' · ' + compactNum(out.balance) + ' VILN ✓';
+      btn.style.borderColor = 'var(--viln)';
+      note.style.display = 'none';
     } else {
-      status.innerHTML = 'Need ' + out.required.toLocaleString() + ' VILN. ' +
+      btn.textContent = short + ' · ' + compactNum(out.balance) + ' VILN';
+      btn.style.borderColor = 'var(--dn)';
+      note.style.display = 'block';
+      note.style.color = 'var(--dn)';
+      note.innerHTML = 'Need ' + out.required.toLocaleString() + ' VILN to unlock analysis. ' +
         '<a href="https://pump.fun/coin/8TE24cDPjHHeh8BntbmFAiNFJR9kC7qjEdDArwyfpump" target="_blank" style="color:var(--viln);">Buy VILN</a>';
-      status.style.color = 'var(--dn)';
     }
   } catch(e){
-    balEl.textContent = '';
-    status.textContent = 'Could not read balance. Try again shortly.';
-    status.style.color = 'var(--mut)';
+    btn.textContent = short;
+    note.style.display = 'block';
+    note.style.color = 'var(--mut)';
+    note.textContent = 'Could not read balance. Try again shortly.';
   }
 }
 
@@ -341,12 +354,14 @@ async function loadMarket(){
 async function analyze(){
   if(!ctx) return;
   const btn = document.getElementById('analyze');
-  const status = document.getElementById('wallet-status');
+  const note = document.getElementById('wallet-note');
+  function showNote(html, color){
+    note.style.display = 'block'; note.innerHTML = html; note.style.color = color || 'var(--mut)';
+  }
 
   // Must connect wallet first.
   if (!wallet.address){
-    status.textContent = 'Connect your Phantom wallet first.';
-    status.style.color = 'var(--dn)';
+    showNote('Connect your Phantom wallet first.', 'var(--dn)');
     return;
   }
 
@@ -356,7 +371,7 @@ async function analyze(){
     auth = await signChallenge();
   } catch(e){
     btn.disabled = false; btn.textContent = 'Analyze market';
-    status.textContent = 'Signature cancelled.'; status.style.color = 'var(--dn)';
+    showNote('Signature cancelled.', 'var(--dn)');
     return;
   }
 
@@ -376,21 +391,20 @@ async function analyze(){
     if(out.error === 'gated'){
       document.getElementById('ai-out').style.display = 'none';
       if(out.reason === 'insufficient'){
-        status.innerHTML = 'You hold ' + (out.balance||0).toLocaleString() + ' VILN. Need ' +
-          out.required.toLocaleString() + '. <a href="https://pump.fun/coin/8TE24cDPjHHeh8BntbmFAiNFJR9kC7qjEdDArwyfpump" target="_blank" style="color:var(--viln);">Buy VILN</a>';
+        showNote('You hold ' + (out.balance||0).toLocaleString() + ' VILN. Need ' +
+          out.required.toLocaleString() + '. <a href="https://pump.fun/coin/8TE24cDPjHHeh8BntbmFAiNFJR9kC7qjEdDArwyfpump" target="_blank" style="color:var(--viln);">Buy VILN</a>', 'var(--dn)');
       } else if(out.reason === 'bad_signature'){
-        status.textContent = 'Signature verification failed. Try again.';
+        showNote('Signature verification failed. Try again.', 'var(--dn)');
       } else if(out.reason === 'rpc_error'){
-        status.textContent = 'Could not read balance right now. Try again shortly.';
+        showNote('Could not read balance right now. Try again shortly.', 'var(--dn)');
       } else {
-        status.textContent = 'Wallet verification required.';
+        showNote('Wallet verification required.', 'var(--dn)');
       }
-      status.style.color = 'var(--dn)';
       btn.disabled = false; btn.textContent = 'Analyze market';
       return;
     }
     if(out.error) throw new Error(out.error);
-    status.textContent = '✓ Verified holder'; status.style.color = 'var(--viln)';
+    note.style.display = 'none';
 
     var ts = Date.now();
     renderVerdict(out, ts);
