@@ -76,11 +76,30 @@ export default async function handler(req, res) {
     const domLv = dom.data.levels || {};
     const support = domLv.support ?? null;
     const resistance = domLv.resistance ?? null;
-    // Invalidation: opposite side of the recent range from the bias direction.
+
+    // Invalidation = the level that, if broken, kills the current read.
+    // Set it just BEYOND the relevant boundary (small buffer) so it never equals support/resistance.
+    // Bullish: break below support invalidates -> a touch under support (or recent low, whichever lower).
+    // Bearish: break above resistance invalidates -> a touch over resistance (or recent high, whichever higher).
+    // Neutral: use the downside break (support) as the reference risk level.
+    const BUF = 0.003; // 0.3% buffer beyond the level
+    function roundLvl(n) {
+      if (n == null) return null;
+      if (n >= 1000) return Math.round(n);
+      if (n >= 1) return Math.round(n * 100) / 100;
+      return Math.round(n * 10000) / 10000;
+    }
     let invalidation = null;
-    if (mtfBias === "Bullish") invalidation = domLv.recentLow ?? support;
-    else if (mtfBias === "Bearish") invalidation = domLv.recentHigh ?? resistance;
-    else invalidation = support;
+    if (mtfBias === "Bullish") {
+      const base = Math.min(support ?? Infinity, domLv.recentLow ?? Infinity);
+      invalidation = isFinite(base) ? roundLvl(base * (1 - BUF)) : null;
+    } else if (mtfBias === "Bearish") {
+      const base = Math.max(resistance ?? -Infinity, domLv.recentHigh ?? -Infinity);
+      invalidation = isFinite(base) ? roundLvl(base * (1 + BUF)) : null;
+    } else {
+      // Neutral: downside invalidation just below support.
+      invalidation = support != null ? roundLvl(support * (1 - BUF)) : null;
+    }
 
     // Detect high-risk conditions across timeframes: active squeeze or extreme crowding.
     const anySqueeze = results.some((r) => {
