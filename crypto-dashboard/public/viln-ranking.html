@@ -283,17 +283,33 @@
 
   function loadAll(){
     return Promise.all(SEARCH_TERMS.map(fetchTerm)).then(function(lists){
-      var seen = {}, out = [];
+      // Merge all pairs, then collapse to one row per TOKEN (not per pool).
+      // A token can trade in many pools; we sum volume/txns across its pools
+      // and keep the deepest-liquidity pool as the representative row.
+      var byToken = {};
       lists.forEach(function(pairs){
         pairs.forEach(function(p){
           if(!p || p.chainId !== CHAIN) return;
-          var addr = p.pairAddress;
-          if(!addr || seen[addr]) return;
-          seen[addr] = true;
-          out.push(normalize(p));
+          var tokenAddr = p.baseToken && p.baseToken.address;
+          if(!tokenAddr) return;
+          var n = normalize(p);
+          var cur = byToken[tokenAddr];
+          if(!cur){
+            byToken[tokenAddr] = n;
+          } else {
+            // aggregate flow metrics across pools
+            cur.vol += n.vol;
+            cur.tx  += n.tx;
+            // representative pool = deepest liquidity (price, chg, link, liq from it)
+            if(n.liq > cur.liq){
+              cur.liq = n.liq; cur.chg = n.chg; cur.price = n.price;
+              cur.url = n.url; cur.addr = n.addr;
+              cur.img = n.img || cur.img;
+            }
+          }
         });
       });
-      return out;
+      return Object.keys(byToken).map(function(k){ return byToken[k]; });
     });
   }
 
@@ -305,6 +321,7 @@
     var info = p.info || {};
     return {
       addr: p.pairAddress,
+      tokenAddr: p.baseToken && p.baseToken.address,
       url: p.url || ("https://dexscreener.com/"+CHAIN+"/"+p.pairAddress),
       sym: (p.baseToken && p.baseToken.symbol) || "?",
       name: (p.baseToken && p.baseToken.name) || "",
@@ -401,11 +418,11 @@
     var prev = lastRanks[current] || {};
     var nextRanks = {};
     var rows = list.map(function(t, i){
-      nextRanks[t.addr] = i;
+      nextRanks[t.tokenAddr||t.addr] = i;
       var flash = "";
-      if(prev[t.addr] !== undefined){
-        if(i < prev[t.addr]) flash = "flash-up";
-        else if(i > prev[t.addr]) flash = "flash-down";
+      if(prev[t.tokenAddr||t.addr] !== undefined){
+        if(i < prev[t.tokenAddr||t.addr]) flash = "flash-up";
+        else if(i > prev[t.tokenAddr||t.addr]) flash = "flash-down";
       }
       var rankCls = i<3 ? "rank top" : "rank";
       var icon = t.img
