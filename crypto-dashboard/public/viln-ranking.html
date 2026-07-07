@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VILN Ranking</title>
+<style>
+  :root{
+    --bg:#070a07;
+    --panel:#0d120d;
+    --panel-2:#111811;
+    --line:rgba(140,211,46,.16);
+    --line-hi:rgba(140,211,46,.34);
+    --toxic:#8CD32E;
+    --toxic-hi:#C6F160;
+    --ink:#EDE8FA;
+    --ink-dim:rgba(237,232,250,.5);
+    --ink-faint:rgba(237,232,250,.32);
+    --up:#8CD32E;
+    --down:#ff5470;
+    --mono:"SFMono-Regular",ui-monospace,"Roboto Mono",Menlo,Consolas,monospace;
+    --sans:"Arial Black","Arial Narrow Bold",system-ui,sans-serif;
+    --body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--body);
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+
+  .wrap{max-width:960px;margin:0 auto;padding:clamp(14px,3vw,26px)}
+
+  /* ── Header ── */
+  .head{
+    display:flex;align-items:flex-end;justify-content:space-between;
+    gap:16px;flex-wrap:wrap;margin-bottom:16px;
+    border-bottom:1px solid var(--line);padding-bottom:14px;
+  }
+  .title{display:flex;align-items:center;gap:11px}
+  .title .dot{
+    width:10px;height:10px;border-radius:50%;
+    background:var(--toxic);box-shadow:0 0 10px var(--toxic);
+    animation:pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .title h1{
+    margin:0;font-family:var(--sans);
+    font-size:clamp(17px,3vw,24px);letter-spacing:.16em;color:var(--ink);
+  }
+  .title h1 span{color:var(--toxic)}
+  .refresh-box{display:flex;align-items:center;gap:12px}
+  .countdown{
+    font-family:var(--mono);font-size:12px;color:var(--ink-dim);
+    letter-spacing:.04em;
+  }
+  .countdown b{color:var(--toxic);font-variant-numeric:tabular-nums}
+  .btn-refresh{
+    font-family:var(--sans);font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--ink-dim);background:transparent;
+    border:1px solid var(--line-hi);border-radius:7px;
+    padding:7px 13px;cursor:pointer;transition:.18s;
+    display:inline-flex;align-items:center;gap:7px;
+  }
+  .btn-refresh:hover{color:var(--toxic);border-color:var(--toxic);box-shadow:0 0 14px rgba(140,211,46,.18)}
+  .btn-refresh.spin .ic{animation:spin .8s linear infinite}
+  .ic{display:inline-block;line-height:1}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* ── Tabs ── */
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+  .tab{
+    flex:1 1 auto;min-width:0;
+    font-family:var(--sans);font-size:clamp(10px,1.6vw,12px);letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-dim);background:var(--panel);
+    border:1px solid var(--line);border-radius:9px;
+    padding:11px 8px;cursor:pointer;transition:.16s;text-align:center;
+    position:relative;overflow:hidden;
+  }
+  .tab small{display:block;font-family:var(--body);font-size:9px;letter-spacing:.02em;
+    text-transform:none;color:var(--ink-faint);margin-top:3px;font-weight:400}
+  .tab:hover{border-color:var(--line-hi);color:var(--ink)}
+  .tab.active{
+    color:#0a0d0a;background:var(--toxic);border-color:var(--toxic);
+    box-shadow:0 0 18px rgba(140,211,46,.28);
+  }
+  .tab.active small{color:rgba(10,13,10,.7)}
+
+  /* ── Search ── */
+  .searchrow{position:relative;margin-bottom:14px}
+  .search{
+    width:100%;font-family:var(--body);font-size:13px;color:var(--ink);
+    background:var(--panel);border:1px solid var(--line);border-radius:9px;
+    padding:11px 13px 11px 36px;outline:none;transition:.16s;
+  }
+  .search::placeholder{color:var(--ink-faint)}
+  .search:focus{border-color:var(--line-hi);box-shadow:0 0 0 3px rgba(140,211,46,.08)}
+  .searchrow .mag{
+    position:absolute;left:12px;top:50%;transform:translateY(-50%);
+    color:var(--ink-faint);font-size:14px;pointer-events:none;
+  }
+
+  /* ── Table ── */
+  .table-wrap{
+    background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;overflow:hidden;
+  }
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{
+    font-family:var(--sans);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--ink-faint);text-align:right;font-weight:400;
+    padding:11px 12px;border-bottom:1px solid var(--line);
+    background:var(--panel-2);position:sticky;top:0;
+  }
+  thead th.l{text-align:left}
+  tbody tr{
+    border-bottom:1px solid rgba(140,211,46,.06);
+    cursor:pointer;transition:background .14s;
+  }
+  tbody tr:last-child{border-bottom:none}
+  tbody tr:hover{background:rgba(140,211,46,.05)}
+  td{padding:11px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  td.l{text-align:left}
+
+  .rank{font-family:var(--mono);color:var(--ink-faint);font-size:12px;width:34px}
+  .rank.top{color:var(--toxic);font-weight:700}
+
+  .tok{display:flex;align-items:center;gap:9px;min-width:0}
+  .tok-ic{
+    width:26px;height:26px;border-radius:50%;flex:none;
+    background:var(--panel-2);border:1px solid var(--line);
+    object-fit:cover;
+  }
+  .tok-txt{min-width:0;line-height:1.25}
+  .tok-sym{font-family:var(--sans);font-size:12px;letter-spacing:.03em;color:var(--ink);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
+  .tok-name{font-size:10px;color:var(--ink-faint);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
+
+  .score{font-family:var(--mono);color:var(--toxic);font-weight:700}
+  .num{font-family:var(--mono);color:var(--ink-dim)}
+  .chg{font-family:var(--mono);font-weight:600}
+  .chg.up{color:var(--up)}
+  .chg.down{color:var(--down)}
+
+  /* rank change flash */
+  @keyframes flashUp{0%{background:rgba(140,211,46,.28)}100%{background:transparent}}
+  @keyframes flashDown{0%{background:rgba(255,84,112,.24)}100%{background:transparent}}
+  tr.flash-up{animation:flashUp 1.6s ease-out}
+  tr.flash-down{animation:flashDown 1.6s ease-out}
+
+  /* states */
+  .state{padding:44px 20px;text-align:center;color:var(--ink-dim);font-size:13px}
+  .state .big{font-family:var(--sans);font-size:14px;letter-spacing:.1em;color:var(--ink);margin-bottom:8px;text-transform:uppercase}
+  .state.err .big{color:var(--down)}
+  .state button{
+    margin-top:14px;font-family:var(--sans);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--toxic);background:transparent;border:1px solid var(--toxic);
+    border-radius:7px;padding:9px 18px;cursor:pointer;transition:.16s;
+  }
+  .state button:hover{background:rgba(140,211,46,.12)}
+  .skel{padding:0}
+  .skel-row{height:48px;border-bottom:1px solid rgba(140,211,46,.05);
+    background:linear-gradient(90deg,transparent,rgba(140,211,46,.05),transparent);
+    background-size:200% 100%;animation:shim 1.3s infinite}
+  @keyframes shim{to{background-position:-200% 0}}
+
+  .foot{
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;
+    margin-top:14px;font-size:11px;color:var(--ink-faint);
+    font-family:var(--mono);letter-spacing:.02em;
+  }
+  .foot a{color:var(--ink-dim);text-decoration:none}
+  .foot a:hover{color:var(--toxic)}
+
+  /* mobile: hide liquidity + volume columns on narrow screens */
+  @media (max-width:560px){
+    .col-liq,.col-vol{display:none}
+    td,thead th{padding:10px 9px}
+    .tok-sym,.tok-name{max-width:96px}
+  }
+  @media (max-width:380px){
+    .tab small{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <div class="title">
+      <span class="dot"></span>
+      <h1>VILN<span>·</span>RANKING</h1>
+    </div>
+    <div class="refresh-box">
+      <span class="countdown">next in <b id="cd">30</b>s</span>
+      <button class="btn-refresh" id="refreshBtn"><span class="ic">↻</span> Refresh</button>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-tab="score">Overall<small>VILN Score</small></button>
+    <button class="tab" data-tab="active">Active<small>Volume + Txns</small></button>
+    <button class="tab" data-tab="stable">Stable<small>Liquidity</small></button>
+    <button class="tab" data-tab="surge">Surge<small>24h Change</small></button>
+  </div>
+
+  <div class="searchrow">
+    <span class="mag">⌕</span>
+    <input class="search" id="search" type="text" placeholder="Filter by symbol or name…" autocomplete="off" spellcheck="false">
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:34px">#</th>
+          <th class="l">Token</th>
+          <th id="th-score">Score</th>
+          <th class="col-liq">Liquidity</th>
+          <th class="col-vol">Vol 24h</th>
+          <th>24h</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="foot">
+    <span id="status">Loading…</span>
+    <span>Data: <a href="https://dexscreener.com" target="_blank" rel="noopener">DexScreener</a> · Solana</span>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ─────────────────────────────────────────────
+  // Config
+  // ─────────────────────────────────────────────
+  var REFRESH_SEC = 30;
+  var TOP_N = 50;
+  // Weights for the overall VILN Score
+  var W = { vol:0.35, liq:0.25, mom:0.20, part:0.20 };
+
+  // Seed tokens to pull. DexScreener's public search/pairs endpoints are keyless.
+  // We search a few Solana-relevant terms and merge unique pairs.
+  var SEARCH_TERMS = ["SOL","BONK","WIF","PUMP","VILN","POPCAT","MEW","GIGA","MOODENG","PNUT"];
+  var CHAIN = "solana";
+
+  // ─────────────────────────────────────────────
+  // State
+  // ─────────────────────────────────────────────
+  var current = "score";
+  var query = "";
+  var lastRanks = {};      // { tabKey: { pairAddr: rankIndex } }
+  var dataCache = [];      // last processed token list
+  var timer = null, cd = REFRESH_SEC, cdTimer = null;
+  var loading = false;
+
+  var tbody = document.getElementById("tbody");
+  var statusEl = document.getElementById("status");
+  var cdEl = document.getElementById("cd");
+  var thScore = document.getElementById("th-score");
+
+  // ─────────────────────────────────────────────
+  // Fetch + normalize
+  // ─────────────────────────────────────────────
+  function fetchTerm(term){
+    var url = "https://api.dexscreener.com/latest/dex/search?q=" + encodeURIComponent(term);
+    return fetch(url).then(function(r){
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      return r.json();
+    }).then(function(j){ return (j && j.pairs) ? j.pairs : []; })
+      .catch(function(){ return []; });
+  }
+
+  function loadAll(){
+    return Promise.all(SEARCH_TERMS.map(fetchTerm)).then(function(lists){
+      var seen = {}, out = [];
+      lists.forEach(function(pairs){
+        pairs.forEach(function(p){
+          if(!p || p.chainId !== CHAIN) return;
+          var addr = p.pairAddress;
+          if(!addr || seen[addr]) return;
+          seen[addr] = true;
+          out.push(normalize(p));
+        });
+      });
+      return out;
+    });
+  }
+
+  function normalize(p){
+    var vol = num(p.volume && p.volume.h24);
+    var liq = num(p.liquidity && p.liquidity.usd);
+    var chg = num(p.priceChange && p.priceChange.h24);
+    var tx  = p.txns && p.txns.h24 ? (num(p.txns.h24.buys)+num(p.txns.h24.sells)) : 0;
+    var info = p.info || {};
+    return {
+      addr: p.pairAddress,
+      url: p.url || ("https://dexscreener.com/"+CHAIN+"/"+p.pairAddress),
+      sym: (p.baseToken && p.baseToken.symbol) || "?",
+      name: (p.baseToken && p.baseToken.name) || "",
+      img: info.imageUrl || "",
+      vol: vol, liq: liq, chg: chg, tx: tx,
+      price: num(p.priceUsd)
+    };
+  }
+
+  function num(v){ var n = parseFloat(v); return isFinite(n) ? n : 0; }
+
+  // ─────────────────────────────────────────────
+  // Scoring (0-100 normalized within current set)
+  // ─────────────────────────────────────────────
+  function computeScores(list){
+    var maxVol = Math.max.apply(null, list.map(function(t){return t.vol}).concat(1));
+    var maxLiq = Math.max.apply(null, list.map(function(t){return t.liq}).concat(1));
+    var maxTx  = Math.max.apply(null, list.map(function(t){return t.tx}).concat(1));
+    list.forEach(function(t){
+      // log-scale the heavy-tailed metrics so a few whales don't flatten everyone
+      var volN = ln(t.vol)/ln(maxVol);
+      var liqN = ln(t.liq)/ln(maxLiq);
+      var txN  = ln(t.tx)/ln(maxTx);
+      // momentum: map 24h change (-100..+100+) to 0..1, clamped
+      var momN = clamp((t.chg + 50) / 150, 0, 1);
+      t.score = Math.round(
+        (W.vol*volN + W.liq*liqN + W.mom*momN + W.part*txN) * 1000
+      ) / 10; // one decimal, 0-100 scale
+    });
+  }
+  function ln(v){ return Math.log(1 + Math.max(0,v)); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+  // ─────────────────────────────────────────────
+  // Sorting per tab
+  // ─────────────────────────────────────────────
+  function sortFor(tab, list){
+    var arr = list.slice();
+    if(tab==="score")  arr.sort(function(a,b){return b.score-a.score});
+    if(tab==="active") arr.sort(function(a,b){return (b.vol+b.tx*10)-(a.vol+a.tx*10)});
+    if(tab==="stable") arr.sort(function(a,b){return b.liq-a.liq});
+    if(tab==="surge")  arr.sort(function(a,b){return b.chg-a.chg});
+    return arr.slice(0, TOP_N);
+  }
+
+  // ─────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────
+  function fmtUsd(v){
+    if(v>=1e9) return "$"+(v/1e9).toFixed(2)+"B";
+    if(v>=1e6) return "$"+(v/1e6).toFixed(2)+"M";
+    if(v>=1e3) return "$"+(v/1e3).toFixed(1)+"K";
+    if(v>0)    return "$"+v.toFixed(0);
+    return "—";
+  }
+  function fmtChg(v){
+    if(!isFinite(v)||v===0) return "0.0%";
+    return (v>0?"+":"")+v.toFixed(1)+"%";
+  }
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
+
+  function metricCell(tab, t){
+    // primary metric shown in the "Score" column changes per tab
+    if(tab==="score")  return '<td class="score">'+t.score.toFixed(1)+'</td>';
+    if(tab==="active") return '<td class="num">'+ (t.tx>0? t.tx.toLocaleString():"—") +'</td>';
+    if(tab==="stable") return '<td class="score">'+fmtUsd(t.liq)+'</td>';
+    if(tab==="surge")  return '<td class="chg '+(t.chg>=0?"up":"down")+'">'+fmtChg(t.chg)+'</td>';
+    return '<td class="num">—</td>';
+  }
+
+  function render(){
+    var list = sortFor(current, dataCache);
+    // apply search
+    if(query){
+      var q = query.toLowerCase();
+      list = list.filter(function(t){
+        return t.sym.toLowerCase().indexOf(q)>-1 || t.name.toLowerCase().indexOf(q)>-1;
+      });
+    }
+
+    // header label per tab
+    thScore.textContent = ({score:"Score",active:"Txns 24h",stable:"Liquidity",surge:"24h"})[current];
+
+    if(!list.length){
+      tbody.innerHTML = '<tr><td colspan="6"><div class="state">'+
+        '<div class="big">Nothing here</div>'+
+        (query? 'No token matches "'+esc(query)+'". Clear the filter to see the full board.'
+              : 'No data returned. Hit refresh to try again.')+
+        '</div></td></tr>';
+      return;
+    }
+
+    var prev = lastRanks[current] || {};
+    var nextRanks = {};
+    var rows = list.map(function(t, i){
+      nextRanks[t.addr] = i;
+      var flash = "";
+      if(prev[t.addr] !== undefined){
+        if(i < prev[t.addr]) flash = "flash-up";
+        else if(i > prev[t.addr]) flash = "flash-down";
+      }
+      var rankCls = i<3 ? "rank top" : "rank";
+      var icon = t.img
+        ? '<img class="tok-ic" src="'+esc(t.img)+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+        : '<span class="tok-ic"></span>';
+      return '<tr class="'+flash+'" data-url="'+esc(t.url)+'">'+
+        '<td class="'+rankCls+'">'+(i+1)+'</td>'+
+        '<td class="l"><div class="tok">'+icon+
+          '<div class="tok-txt"><div class="tok-sym">'+esc(t.sym)+'</div>'+
+          '<div class="tok-name">'+esc(t.name)+'</div></div></div></td>'+
+        metricCell(current, t)+
+        '<td class="col-liq num">'+fmtUsd(t.liq)+'</td>'+
+        '<td class="col-vol num">'+fmtUsd(t.vol)+'</td>'+
+        '<td class="chg '+(t.chg>=0?"up":"down")+'">'+fmtChg(t.chg)+'</td>'+
+      '</tr>';
+    }).join("");
+
+    tbody.innerHTML = rows;
+    lastRanks[current] = nextRanks;
+  }
+
+  function showSkeleton(){
+    var rows = "";
+    for(var i=0;i<10;i++) rows += '<tr><td colspan="6" class="skel"><div class="skel-row"></div></td></tr>';
+    tbody.innerHTML = rows;
+  }
+
+  function showError(){
+    tbody.innerHTML = '<tr><td colspan="6"><div class="state err">'+
+      '<div class="big">Couldn\'t load the board</div>'+
+      'DexScreener didn\'t respond. This is usually a network hiccup or a rate limit — give it a moment.'+
+      '<br><button id="retry">Retry now</button></div></td></tr>';
+    var r = document.getElementById("retry");
+    if(r) r.addEventListener("click", function(){ refresh(true); });
+  }
+
+  // ─────────────────────────────────────────────
+  // Refresh cycle
+  // ─────────────────────────────────────────────
+  function refresh(manual){
+    if(loading) return;
+    loading = true;
+    var btn = document.getElementById("refreshBtn");
+    btn.classList.add("spin");
+    if(!dataCache.length) showSkeleton();
+    statusEl.textContent = "Fetching live pairs…";
+
+    loadAll().then(function(list){
+      if(!list.length) throw new Error("empty");
+      computeScores(list);
+      dataCache = list;
+      render();
+      var now = new Date();
+      statusEl.textContent = list.length+" pairs · updated "+
+        now.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});
+    }).catch(function(){
+      if(!dataCache.length) showError();
+      statusEl.textContent = "Update failed — showing last data";
+    }).then(function(){
+      loading = false;
+      btn.classList.remove("spin");
+      resetCountdown();
+    });
+  }
+
+  function resetCountdown(){
+    cd = REFRESH_SEC;
+    cdEl.textContent = cd;
+  }
+
+  function tick(){
+    cd--;
+    if(cd<=0){ refresh(false); return; }
+    cdEl.textContent = cd;
+  }
+
+  // ─────────────────────────────────────────────
+  // Events
+  // ─────────────────────────────────────────────
+  document.getElementById("tabs").addEventListener("click", function(e){
+    var b = e.target.closest(".tab");
+    if(!b) return;
+    document.querySelectorAll(".tab").forEach(function(t){t.classList.remove("active")});
+    b.classList.add("active");
+    current = b.getAttribute("data-tab");
+    render();
+  });
+
+  document.getElementById("search").addEventListener("input", function(e){
+    query = e.target.value.trim();
+    render();
+  });
+
+  document.getElementById("refreshBtn").addEventListener("click", function(){
+    refresh(true);
+  });
+
+  tbody.addEventListener("click", function(e){
+    var tr = e.target.closest("tr[data-url]");
+    if(!tr) return;
+    var url = tr.getAttribute("data-url");
+    if(url) window.open(url, "_blank", "noopener");
+  });
+
+  // ─────────────────────────────────────────────
+  // Boot
+  // ─────────────────────────────────────────────
+  refresh(true);
+  cdTimer = setInterval(tick, 1000);
+})();
+</script>
+</body>
+</html>
