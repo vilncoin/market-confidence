@@ -151,6 +151,14 @@
       <p class="lbl">Summary</p>
       <p class="post" id="v-summary" style="margin:0;"></p>
     </div>
+
+    <!-- Detailed report (collapsible) -->
+    <div class="aiblock" id="detail-block" style="display:none;">
+      <button id="detail-toggle" style="width:100%; background:none; border:none; color:var(--viln); font-size:13px; font-weight:600; cursor:pointer; text-align:left; padding:0; display:flex; align-items:center; gap:6px;">
+        <span id="detail-arrow">▼</span> Detailed analysis
+      </button>
+      <div class="post" id="v-detailed" style="display:none; margin-top:12px; white-space:pre-wrap; line-height:1.7;"></div>
+    </div>
   </div>
 
   <div style="margin-top:2rem; padding-top:1.5rem; border-top:1px solid var(--line);">
@@ -353,6 +361,7 @@ async function loadMarket(){
 
 async function analyze(){
   if(!ctx) return;
+  if(window._cooldownActive) return;
   const btn = document.getElementById('analyze');
   const note = document.getElementById('wallet-note');
   function showNote(html, color){
@@ -411,12 +420,56 @@ async function analyze(){
     try {
       localStorage.setItem('viln_last_analysis', JSON.stringify({ out: out, ts: ts, symbol: document.getElementById('symbol').value }));
     } catch(e){}
+    startCooldown(3600); // 1 hour cooldown — premium hourly report cadence
+    return; // skip finally reset — cooldown controls the button now
   } catch(e){
     document.getElementById('v-verdict').textContent = 'Error';
     document.getElementById('v-summary').textContent = e.message;
   } finally {
-    btn.disabled = false; btn.textContent = 'Analyze market';
+    if (!window._cooldownActive){
+      btn.disabled = false; btn.textContent = 'Analyze market';
+    }
   }
+}
+
+// Disable the analyze button for `secs` seconds with a live countdown.
+function startCooldown(secs){
+  var until = Date.now() + secs * 1000;
+  try { localStorage.setItem('viln_cooldown_until', String(until)); } catch(e){}
+  runCooldown(until);
+}
+
+function runCooldown(until){
+  var btn = document.getElementById('analyze');
+  window._cooldownActive = true;
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  function tick(){
+    var remaining = Math.ceil((until - Date.now()) / 1000);
+    if (remaining <= 0){
+      clearInterval(timer);
+      window._cooldownActive = false;
+      btn.disabled = false;
+      btn.style.opacity = '1';
+      btn.textContent = 'Analyze market';
+      try { localStorage.removeItem('viln_cooldown_until'); } catch(e){}
+    } else {
+      var m = Math.floor(remaining / 60);
+      var s = remaining % 60;
+      var label = m > 0 ? ('Next analysis in ' + m + 'm ' + ('0'+s).slice(-2) + 's') : ('Next analysis in ' + s + 's');
+      btn.textContent = label;
+    }
+  }
+  tick();
+  var timer = setInterval(tick, 1000);
+}
+
+// Resume cooldown if one is still active after a refresh.
+function resumeCooldown(){
+  try {
+    var until = parseInt(localStorage.getItem('viln_cooldown_until') || '0', 10);
+    if (until && until > Date.now()) runCooldown(until);
+  } catch(e){}
 }
 
 // Render the verdict card from a result object. Shared by fresh analysis and restore.
@@ -453,6 +506,16 @@ function renderVerdict(out, ts){
 
   document.getElementById('v-summary').textContent = out.summary || '';
 
+  // Detailed report (collapsible)
+  var detBlock = document.getElementById('detail-block');
+  var detEl = document.getElementById('v-detailed');
+  if (out.detailed && out.detailed.trim()){
+    detEl.textContent = out.detailed;
+    detBlock.style.display = 'block';
+  } else {
+    detBlock.style.display = 'none';
+  }
+
   // Timestamp line.
   if (ts){
     var tEl = document.getElementById('v-time');
@@ -485,6 +548,17 @@ document.getElementById('tf').onchange = userReload;
 document.getElementById('refresh').onclick = userReload;
 document.getElementById('analyze').onclick = analyze;
 document.getElementById('connect').onclick = connectWallet;
+(function(){
+  var t = document.getElementById('detail-toggle');
+  if (t){
+    t.onclick = function(){
+      var d = document.getElementById('v-detailed');
+      var a = document.getElementById('detail-arrow');
+      if (d.style.display === 'none'){ d.style.display = 'block'; a.textContent = '▲'; }
+      else { d.style.display = 'none'; a.textContent = '▼'; }
+    };
+  }
+})();
 var solBtn = document.getElementById('sol-copy');
 if(solBtn){
   solBtn.onclick = function(){
@@ -495,6 +569,7 @@ if(solBtn){
 }
 loadMarket();
 restoreLastAnalysis();
+resumeCooldown();
 </script>
 </body>
 </html>
