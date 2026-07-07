@@ -2,5 +2,8 @@
   "name": "market-confidence",
   "version": "1.0.0",
   "type": "module",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "tweetnacl": "^1.0.3"
+  }
 }
