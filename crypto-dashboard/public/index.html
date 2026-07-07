@@ -38,7 +38,17 @@
   <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
     <h1 style="margin:0; letter-spacing:0.5px;">VILN <span style="color:var(--viln);">CONFIDENCE</span></h1>
   </div>
-  <p style="color:var(--mut); font-size:13px; margin:0 0 20px;">Real-time futures signals for the VILN network.</p>
+  <p style="color:var(--mut); font-size:13px; margin:0 0 16px;">Real-time futures signals for the VILN network.</p>
+
+  <div id="wallet-bar" style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:16px; flex-wrap:wrap; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px;">
+    <button id="connect" style="height:40px; padding:0 16px; background:var(--soft); color:var(--txt); border:1px solid var(--viln); border-radius:8px; font-weight:600; cursor:pointer;">
+      Connect Phantom
+    </button>
+    <div style="text-align:right;">
+      <div id="wallet-balance" style="font-size:14px; font-weight:600; color:var(--txt);"></div>
+      <span id="wallet-status" style="font-size:12px; color:var(--mut);">1,000 VILN required to unlock analysis</span>
+    </div>
+  </div>
   <div class="row">
     <div style="display:flex; gap:8px;">
       <select id="symbol">
@@ -100,13 +110,6 @@
     </div>
   </div>
 
-  <div id="wallet-bar" style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
-    <button id="connect" style="height:40px; padding:0 16px; background:var(--soft); color:var(--txt); border:1px solid var(--viln); border-radius:8px; font-weight:600; cursor:pointer;">
-      Connect Phantom
-    </button>
-    <span id="wallet-status" style="font-size:12px; color:var(--mut);">1,000 VILN required to unlock analysis</span>
-  </div>
-
   <button class="analyze" id="analyze">Analyze market</button>
 
   <div id="ai-out" style="display:none;">
@@ -114,6 +117,7 @@
     <div id="verdict-box" class="aiblock" style="text-align:center; padding:1.25rem;">
       <p class="lbl" style="margin:0 0 6px;">VILN Verdict</p>
       <p id="v-verdict" style="font-size:28px; font-weight:700; margin:0;">—</p>
+      <p id="v-time" style="font-size:11px; color:var(--mut); margin:6px 0 0;"></p>
       <div style="display:flex; justify-content:center; gap:24px; margin-top:12px;">
         <div><p style="font-size:11px; color:var(--mut); margin:0;">Bias</p><p id="v-bias" style="font-size:14px; font-weight:600; margin:2px 0 0;">—</p></div>
         <div><p style="font-size:11px; color:var(--mut); margin:0;">Confidence</p><p id="v-conf" style="font-size:14px; font-weight:600; margin:2px 0 0;">—</p></div>
@@ -203,10 +207,38 @@ async function connectWallet(){
     wallet.address = resp.publicKey.toString();
     var short = wallet.address.slice(0,4) + '…' + wallet.address.slice(-4);
     document.getElementById('connect').textContent = short;
-    status.textContent = 'Wallet connected. Click Analyze to verify VILN balance.';
-    status.style.color = 'var(--viln)';
+    status.textContent = 'Reading VILN balance…';
+    status.style.color = 'var(--mut)';
+    await refreshBalance();
   } catch(e){
     status.textContent = 'Connection cancelled.';
+  }
+}
+
+// Fetch and display the wallet's VILN balance (public, no signature needed).
+async function refreshBalance(){
+  const status = document.getElementById('wallet-status');
+  const balEl = document.getElementById('wallet-balance');
+  if (!wallet.address) return;
+  try {
+    const r = await fetch('/api/balance?address=' + encodeURIComponent(wallet.address));
+    const out = await r.json();
+    if (out.error) throw new Error(out.error);
+    wallet.balance = out.balance;
+    balEl.textContent = out.balance.toLocaleString() + ' VILN';
+    balEl.style.color = out.eligible ? 'var(--viln)' : 'var(--dn)';
+    if (out.eligible){
+      status.textContent = '✓ Eligible — click Analyze';
+      status.style.color = 'var(--viln)';
+    } else {
+      status.innerHTML = 'Need ' + out.required.toLocaleString() + ' VILN. ' +
+        '<a href="https://pump.fun/coin/8TE24cDPjHHeh8BntbmFAiNFJR9kC7qjEdDArwyfpump" target="_blank" style="color:var(--viln);">Buy VILN</a>';
+      status.style.color = 'var(--dn)';
+    }
+  } catch(e){
+    balEl.textContent = '';
+    status.textContent = 'Could not read balance. Try again shortly.';
+    status.style.color = 'var(--mut)';
   }
 }
 
@@ -301,7 +333,9 @@ async function loadMarket(){
     bkEl.style.color = bk.label === 'bid-heavy' ? 'var(--up)' : bk.label === 'ask-heavy' ? 'var(--dn)' : 'var(--txt)';
   } else { bkEl.textContent = '—'; }
 
-  document.getElementById('ai-out').style.display = 'none';
+  if (window._userReload) {
+    document.getElementById('ai-out').style.display = 'none';
+  }
 }
 
 async function analyze(){
@@ -358,42 +392,11 @@ async function analyze(){
     if(out.error) throw new Error(out.error);
     status.textContent = '✓ Verified holder'; status.style.color = 'var(--viln)';
 
-    // Verdict
-    var vColors = { green:'var(--up)', red:'var(--dn)', yellow:'#e2b93b', orange:'#e8833a' };
-    var vEmoji = { green:'🟢', red:'🔴', yellow:'🟡', orange:'⚠' };
-    var vc = vColors[out.verdictColor] || 'var(--txt)';
-    var vEl = document.getElementById('v-verdict');
-    vEl.textContent = (vEmoji[out.verdictColor]||'') + ' ' + out.verdict;
-    vEl.style.color = vc;
-    document.getElementById('verdict-box').style.borderColor = vc;
-
-    document.getElementById('v-bias').textContent = out.biasLabel || '—';
-    document.getElementById('v-conf').textContent = (out.conf != null ? out.conf + '%' : '—');
-    var alignTxt = out.alignment === 'aligned' ? '✓ Aligned' : out.alignment === 'conflicting' ? '⚠ Conflicting' : 'Mixed';
-    document.getElementById('v-align').textContent = alignTxt;
-
-    // Multi-timeframe
-    document.getElementById('v-frames').innerHTML = (out.frames || []).map(function(f){
-      var c = f.dir === 'Bearish' ? 'var(--dn)' : f.dir === 'Bullish' ? 'var(--up)' : 'var(--mut)';
-      var dot = f.dir === 'Bearish' ? '🔴' : f.dir === 'Bullish' ? '🟢' : '🟡';
-      return '<div style="flex:1; text-align:center; background:var(--soft); border-radius:8px; padding:10px 6px;">' +
-             '<p style="font-size:12px; color:var(--mut); margin:0;">'+f.tf+'</p>' +
-             '<p style="font-size:13px; font-weight:600; color:'+c+'; margin:4px 0 0;">'+dot+' '+f.dir+'</p></div>';
-    }).join('');
-
-    // Why
-    document.getElementById('v-why').innerHTML = (out.why || []).map(function(w){
-      return '<li>'+w+'</li>';
-    }).join('') || '<li style="list-style:none; color:var(--mut);">—</li>';
-
-    // Levels
-    var lv = out.levels || {};
-    document.getElementById('v-sup').textContent = lv.support != null ? '$'+Number(lv.support).toLocaleString() : '—';
-    document.getElementById('v-res').textContent = lv.resistance != null ? '$'+Number(lv.resistance).toLocaleString() : '—';
-    document.getElementById('v-inv').textContent = lv.invalidation != null ? '$'+Number(lv.invalidation).toLocaleString() : '—';
-
-    // Summary
-    document.getElementById('v-summary').textContent = out.summary || '';
+    var ts = Date.now();
+    renderVerdict(out, ts);
+    try {
+      localStorage.setItem('viln_last_analysis', JSON.stringify({ out: out, ts: ts, symbol: document.getElementById('symbol').value }));
+    } catch(e){}
   } catch(e){
     document.getElementById('v-verdict').textContent = 'Error';
     document.getElementById('v-summary').textContent = e.message;
@@ -402,9 +405,70 @@ async function analyze(){
   }
 }
 
-document.getElementById('symbol').onchange = loadMarket;
-document.getElementById('tf').onchange = loadMarket;
-document.getElementById('refresh').onclick = loadMarket;
+// Render the verdict card from a result object. Shared by fresh analysis and restore.
+function renderVerdict(out, ts){
+  var vColors = { green:'var(--up)', red:'var(--dn)', yellow:'#e2b93b', orange:'#e8833a' };
+  var vEmoji = { green:'🟢', red:'🔴', yellow:'🟡', orange:'⚠' };
+  var vc = vColors[out.verdictColor] || 'var(--txt)';
+  var vEl = document.getElementById('v-verdict');
+  vEl.textContent = (vEmoji[out.verdictColor]||'') + ' ' + out.verdict;
+  vEl.style.color = vc;
+  document.getElementById('verdict-box').style.borderColor = vc;
+
+  document.getElementById('v-bias').textContent = out.biasLabel || '—';
+  document.getElementById('v-conf').textContent = (out.conf != null ? out.conf + '%' : '—');
+  var alignTxt = out.alignment === 'aligned' ? '✓ Aligned' : out.alignment === 'conflicting' ? '⚠ Conflicting' : 'Mixed';
+  document.getElementById('v-align').textContent = alignTxt;
+
+  document.getElementById('v-frames').innerHTML = (out.frames || []).map(function(f){
+    var c = f.dir === 'Bearish' ? 'var(--dn)' : f.dir === 'Bullish' ? 'var(--up)' : 'var(--mut)';
+    var dot = f.dir === 'Bearish' ? '🔴' : f.dir === 'Bullish' ? '🟢' : '🟡';
+    return '<div style="flex:1; text-align:center; background:var(--soft); border-radius:8px; padding:10px 6px;">' +
+           '<p style="font-size:12px; color:var(--mut); margin:0;">'+f.tf+'</p>' +
+           '<p style="font-size:13px; font-weight:600; color:'+c+'; margin:4px 0 0;">'+dot+' '+f.dir+'</p></div>';
+  }).join('');
+
+  document.getElementById('v-why').innerHTML = (out.why || []).map(function(w){
+    return '<li>'+w+'</li>';
+  }).join('') || '<li style="list-style:none; color:var(--mut);">—</li>';
+
+  var lv = out.levels || {};
+  document.getElementById('v-sup').textContent = lv.support != null ? '$'+Number(lv.support).toLocaleString() : '—';
+  document.getElementById('v-res').textContent = lv.resistance != null ? '$'+Number(lv.resistance).toLocaleString() : '—';
+  document.getElementById('v-inv').textContent = lv.invalidation != null ? '$'+Number(lv.invalidation).toLocaleString() : '—';
+
+  document.getElementById('v-summary').textContent = out.summary || '';
+
+  // Timestamp line.
+  if (ts){
+    var tEl = document.getElementById('v-time');
+    if (tEl){
+      var d = new Date(ts);
+      var hh = ('0'+d.getHours()).slice(-2), mm = ('0'+d.getMinutes()).slice(-2);
+      var mins = Math.round((Date.now()-ts)/60000);
+      var ago = mins <= 0 ? 'just now' : mins === 1 ? '1 min ago' : mins + ' min ago';
+      tEl.textContent = 'Analyzed at ' + hh + ':' + mm + ' · ' + ago;
+    }
+  }
+  document.getElementById('ai-out').style.display = 'block';
+}
+
+// Restore last analysis from localStorage on page load.
+function restoreLastAnalysis(){
+  try {
+    var raw = localStorage.getItem('viln_last_analysis');
+    if (!raw) return;
+    var saved = JSON.parse(raw);
+    if (saved && saved.out){
+      renderVerdict(saved.out, saved.ts);
+    }
+  } catch(e){}
+}
+
+function userReload(){ window._userReload = true; loadMarket(); }
+document.getElementById('symbol').onchange = userReload;
+document.getElementById('tf').onchange = userReload;
+document.getElementById('refresh').onclick = userReload;
 document.getElementById('analyze').onclick = analyze;
 document.getElementById('connect').onclick = connectWallet;
 var solBtn = document.getElementById('sol-copy');
@@ -416,6 +480,7 @@ if(solBtn){
   };
 }
 loadMarket();
+restoreLastAnalysis();
 </script>
 </body>
 </html>
