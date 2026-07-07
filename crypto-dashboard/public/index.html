@@ -72,7 +72,7 @@
       <p class="lbl" style="margin-top:14px;">Confidence</p>
       <div style="display:flex; align-items:center; gap:10px;">
         <div class="bar"><div id="confbar"></div></div>
-        <span id="conf" style="font-weight:600; min-width:42px; text-align:right;">—</span>
+        <span id="conf" style="font-weight:600; min-width:auto; white-space:nowrap; text-align:right; font-size:13px;">—</span>
       </div>
     </div>
     <div class="card">
@@ -195,6 +195,14 @@
 let ctx = null;
 let wallet = { address: null };
 
+// Confidence level label: Low / Medium / High.
+function confLevel(n){
+  if (n == null) return '—';
+  if (n < 30) return 'Low';
+  if (n < 60) return 'Medium';
+  return 'High';
+}
+
 function getProvider(){
   if (window.phantom && window.phantom.solana && window.phantom.solana.isPhantom) return window.phantom.solana;
   if (window.solana && window.solana.isPhantom) return window.solana;
@@ -303,7 +311,7 @@ async function loadMarket(){
   const biasEl = document.getElementById('bias');
   biasEl.textContent = bias.bias;
   biasEl.style.color = bias.bias==='Bearish'?'var(--dn)':bias.bias==='Bullish'?'var(--up)':'var(--mut)';
-  document.getElementById('conf').textContent = bias.conf + '%';
+  document.getElementById('conf').textContent = confLevel(bias.conf) + ' (' + bias.conf + '%)';
   const cb = document.getElementById('confbar');
   cb.style.width = bias.conf + '%';
   cb.style.background = bias.bias==='Bearish'?'var(--dn)':bias.bias==='Bullish'?'var(--up)':'var(--mut)';
@@ -483,7 +491,7 @@ function renderVerdict(out, ts){
   document.getElementById('verdict-box').style.borderColor = vc;
 
   document.getElementById('v-bias').textContent = out.biasLabel || '—';
-  document.getElementById('v-conf').textContent = (out.conf != null ? out.conf + '%' : '—');
+  document.getElementById('v-conf').textContent = (out.conf != null ? confLevel(out.conf) + ' (' + out.conf + '%)' : '—');
   var alignTxt = out.alignment === 'aligned' ? '✓ Aligned' : out.alignment === 'conflicting' ? '⚠ Conflicting' : 'Mixed';
   document.getElementById('v-align').textContent = alignTxt;
 
