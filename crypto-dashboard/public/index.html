@@ -100,6 +100,13 @@
     </div>
   </div>
 
+  <div id="wallet-bar" style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
+    <button id="connect" style="height:40px; padding:0 16px; background:var(--soft); color:var(--txt); border:1px solid var(--viln); border-radius:8px; font-weight:600; cursor:pointer;">
+      Connect Phantom
+    </button>
+    <span id="wallet-status" style="font-size:12px; color:var(--mut);">1,000 VILN required to unlock analysis</span>
+  </div>
+
   <button class="analyze" id="analyze">Analyze market</button>
 
   <div id="ai-out" style="display:none;">
@@ -175,6 +182,61 @@
 
 <script>
 let ctx = null;
+let wallet = { address: null };
+
+function getProvider(){
+  if (window.phantom && window.phantom.solana && window.phantom.solana.isPhantom) return window.phantom.solana;
+  if (window.solana && window.solana.isPhantom) return window.solana;
+  return null;
+}
+
+async function connectWallet(){
+  const p = getProvider();
+  const status = document.getElementById('wallet-status');
+  if (!p){
+    status.textContent = 'Phantom not found — install the Phantom extension.';
+    window.open('https://phantom.app/', '_blank');
+    return;
+  }
+  try {
+    const resp = await p.connect();
+    wallet.address = resp.publicKey.toString();
+    var short = wallet.address.slice(0,4) + '…' + wallet.address.slice(-4);
+    document.getElementById('connect').textContent = short;
+    status.textContent = 'Wallet connected. Click Analyze to verify VILN balance.';
+    status.style.color = 'var(--viln)';
+  } catch(e){
+    status.textContent = 'Connection cancelled.';
+  }
+}
+
+// Ask the wallet to sign a fresh challenge so the server can prove ownership.
+async function signChallenge(){
+  const p = getProvider();
+  if (!p || !wallet.address) throw new Error('Wallet not connected');
+  const message = 'VILN Confidence access\nWallet: ' + wallet.address + '\nTime: ' + new Date().toISOString();
+  const encoded = new TextEncoder().encode(message);
+  const signed = await p.signMessage(encoded, 'utf8');
+  // Phantom returns { signature: Uint8Array }. Convert to base58.
+  var sigBytes = signed.signature || signed;
+  return { message: message, signature: b58encode(sigBytes), address: wallet.address };
+}
+
+// base58 encode for the signature bytes.
+const _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function b58encode(bytes){
+  bytes = Array.from(bytes);
+  let digits = [0];
+  for (let i=0;i<bytes.length;i++){
+    let carry = bytes[i];
+    for (let j=0;j<digits.length;j++){ carry += digits[j] << 8; digits[j] = carry % 58; carry = (carry / 58) | 0; }
+    while (carry){ digits.push(carry % 58); carry = (carry / 58) | 0; }
+  }
+  let out = '';
+  for (let k=0; bytes[k]===0 && k<bytes.length-1; k++) out += '1';
+  for (let q=digits.length-1; q>=0; q--) out += _B58[digits[q]];
+  return out;
+}
 
 async function loadMarket(){
   const symbol = document.getElementById('symbol').value;
@@ -245,7 +307,26 @@ async function loadMarket(){
 async function analyze(){
   if(!ctx) return;
   const btn = document.getElementById('analyze');
-  btn.disabled = true; btn.textContent = 'Analyzing…';
+  const status = document.getElementById('wallet-status');
+
+  // Must connect wallet first.
+  if (!wallet.address){
+    status.textContent = 'Connect your Phantom wallet first.';
+    status.style.color = 'var(--dn)';
+    return;
+  }
+
+  btn.disabled = true; btn.textContent = 'Verifying…';
+  let auth;
+  try {
+    auth = await signChallenge();
+  } catch(e){
+    btn.disabled = false; btn.textContent = 'Analyze market';
+    status.textContent = 'Signature cancelled.'; status.style.color = 'var(--dn)';
+    return;
+  }
+
+  btn.textContent = 'Analyzing…';
   document.getElementById('ai-out').style.display = 'block';
   document.getElementById('v-verdict').textContent = '…';
   document.getElementById('v-summary').textContent = 'Analyzing all timeframes…';
@@ -254,10 +335,28 @@ async function analyze(){
   try {
     var symbol = document.getElementById('symbol').value;
     const r = await fetch('/api/analyze', {
-      method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ symbol: symbol })
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ symbol: symbol, auth: auth })
     });
     const out = await r.json();
+    if(out.error === 'gated'){
+      document.getElementById('ai-out').style.display = 'none';
+      if(out.reason === 'insufficient'){
+        status.innerHTML = 'You hold ' + (out.balance||0).toLocaleString() + ' VILN. Need ' +
+          out.required.toLocaleString() + '. <a href="https://pump.fun/coin/8TE24cDPjHHeh8BntbmFAiNFJR9kC7qjEdDArwyfpump" target="_blank" style="color:var(--viln);">Buy VILN</a>';
+      } else if(out.reason === 'bad_signature'){
+        status.textContent = 'Signature verification failed. Try again.';
+      } else if(out.reason === 'rpc_error'){
+        status.textContent = 'Could not read balance right now. Try again shortly.';
+      } else {
+        status.textContent = 'Wallet verification required.';
+      }
+      status.style.color = 'var(--dn)';
+      btn.disabled = false; btn.textContent = 'Analyze market';
+      return;
+    }
     if(out.error) throw new Error(out.error);
+    status.textContent = '✓ Verified holder'; status.style.color = 'var(--viln)';
 
     // Verdict
     var vColors = { green:'var(--up)', red:'var(--dn)', yellow:'#e2b93b', orange:'#e8833a' };
@@ -307,6 +406,7 @@ document.getElementById('symbol').onchange = loadMarket;
 document.getElementById('tf').onchange = loadMarket;
 document.getElementById('refresh').onclick = loadMarket;
 document.getElementById('analyze').onclick = analyze;
+document.getElementById('connect').onclick = connectWallet;
 var solBtn = document.getElementById('sol-copy');
 if(solBtn){
   solBtn.onclick = function(){
