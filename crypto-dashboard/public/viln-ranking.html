@@ -302,6 +302,10 @@
   // New Gems tab only shows tokens younger than this (days). Older boosted coins
   // won't leak into "New" just because they paid for boosts.
   var MAX_FRESH_DAYS = 7;
+  // Pumping tab sanity filters:
+  var PUMP_MAX_CHG   = 10000;    // >10000% 24h is almost always broken data, drop it
+  var PUMP_MIN_VOLMC = 0.002;    // volume must be ≥ 0.2% of mcap (else dead/broken)
+  var PUMP_MAX_MCAP  = 50000000; // hide majors from Pumping — memecoin gainers only ($50M)
   // Whale activity: average trade size (24h volume ÷ trade count) at or above
   // this suggests large orders (whales) rather than retail. $2K per trade.
   var WHALE_AVG_TRADE = 2000;
@@ -615,12 +619,19 @@
     if(tab==="fresh"){
       arr = arr.filter(function(t){ return isFinite(t.ageDays) && t.ageDays <= MAX_FRESH_DAYS; });
     }
-    // Pumping: drop early-listing fake spikes — a huge % on a brand-new pair is
-    // usually just price discovery, not a real pump. (< 2h old AND > 1000%.)
+    // Pumping: drop noise so real memecoin gainers surface.
     if(tab==="surge"){
       arr = arr.filter(function(t){
+        // 1) early-listing fake spike (brand-new pair, price still discovering)
         var tooYoung = isFinite(t.ageDays) && t.ageDays < (2/24);
-        return !(tooYoung && t.chg > 1000);
+        if(tooYoung && t.chg > 1000) return false;
+        // 2) absurd % — almost always broken data
+        if(t.chg > PUMP_MAX_CHG) return false;
+        // 3) big mcap but almost no volume = dead/broken listing
+        if(t.mcap > 0 && (t.vol / t.mcap) < PUMP_MIN_VOLMC) return false;
+        // 4) hide majors — keep it to memecoin-scale gainers
+        if(t.mcap >= PUMP_MAX_MCAP) return false;
+        return true;
       });
     }
     // Column-click override takes precedence over the tab's default sort.
