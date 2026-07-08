@@ -117,6 +117,10 @@
     background:var(--panel-2);position:sticky;top:0;
   }
   thead th.l{text-align:left}
+  thead th.sortable{cursor:pointer;user-select:none;transition:color .14s}
+  thead th.sortable:hover{color:var(--ink)}
+  thead th.sort-asc::after{content:" ▲";font-size:8px;color:var(--toxic)}
+  thead th.sort-desc::after{content:" ▼";font-size:8px;color:var(--toxic)}
   tbody tr{
     border-bottom:1px solid rgba(140,211,46,.06);
     cursor:pointer;transition:background .14s;
@@ -191,7 +195,13 @@
   }
   .legend .trust,.legend .wash{margin:0 3px 0 0}
 
-  /* mobile: hide liquidity + volume columns on narrow screens */
+  /* progressive column hiding as the screen narrows */
+  @media (max-width:820px){
+    .col-5m{display:none}
+  }
+  @media (max-width:680px){
+    .col-mcap,.col-1h{display:none}
+  }
   @media (max-width:560px){
     .col-liq,.col-vol{display:none}
     td,thead th{padding:10px 9px}
@@ -234,10 +244,13 @@
         <tr>
           <th style="width:34px">#</th>
           <th class="l">Token</th>
-          <th id="th-score">Score</th>
-          <th class="col-liq">Liquidity</th>
-          <th class="col-vol">Vol 24h</th>
-          <th>24h</th>
+          <th id="th-score" class="sortable" data-sort="metric">Score</th>
+          <th class="sortable col-mcap" data-sort="mcap">MCap</th>
+          <th class="sortable col-liq" data-sort="liq">Liquidity</th>
+          <th class="sortable col-vol" data-sort="vol">Vol 24h</th>
+          <th class="sortable col-5m" data-sort="chg5m">5m</th>
+          <th class="sortable col-1h" data-sort="chg1h">1h</th>
+          <th class="sortable" data-sort="chg">24h</th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>
@@ -311,6 +324,8 @@
   // ─────────────────────────────────────────────
   var current = "score";
   var query = "";
+  var sortKey = null;   // column-click override; null = use tab default
+  var sortDir = -1;     // -1 desc, 1 asc
   var lastRanks = {};      // { tabKey: { pairAddr: rankIndex } }
   var dataCache = [];      // last processed token list
   var timer = null, cd = REFRESH_SEC, cdTimer = null;
@@ -435,6 +450,7 @@
             if(n.createdAt && (!cur.createdAt || n.createdAt < cur.createdAt)) cur.createdAt = n.createdAt;
             if(n.liq > cur.liq){
               cur.liq = n.liq; cur.chg = n.chg; cur.price = n.price;
+              cur.chg5m = n.chg5m; cur.chg1h = n.chg1h; cur.mcap = n.mcap;
               cur.url = n.url; cur.addr = n.addr;
               cur.img = n.img || cur.img;
             }
@@ -465,6 +481,8 @@
     var vol = num(p.volume && p.volume.h24);
     var liq = num(p.liquidity && p.liquidity.usd);
     var chg = num(p.priceChange && p.priceChange.h24);
+    var chg5m = num(p.priceChange && p.priceChange.m5);
+    var chg1h = num(p.priceChange && p.priceChange.h1);
     var tx  = p.txns && p.txns.h24 ? (num(p.txns.h24.buys)+num(p.txns.h24.sells)) : 0;
     var info = p.info || {};
     return {
@@ -474,8 +492,9 @@
       sym: (p.baseToken && p.baseToken.symbol) || "?",
       name: (p.baseToken && p.baseToken.name) || "",
       img: info.imageUrl || "",
-      vol: vol, liq: liq, chg: chg, tx: tx,
+      vol: vol, liq: liq, chg: chg, chg5m: chg5m, chg1h: chg1h, tx: tx,
       price: num(p.priceUsd),
+      mcap: num(p.marketCap) || num(p.fdv),
       createdAt: num(p.pairCreatedAt),
       boost: (p.boosts && num(p.boosts.active)) || 0
     };
@@ -556,11 +575,21 @@
   // ─────────────────────────────────────────────
   function sortFor(tab, list){
     var arr = list.slice();
+    // Column-click override takes precedence over the tab's default sort.
+    if(sortKey){
+      var key = sortKey === "metric" ? metricKeyFor(tab) : sortKey;
+      arr.sort(function(a,b){ return (num(a[key]) - num(b[key])) * sortDir; });
+      return arr.slice(0, TOP_N);
+    }
     if(tab==="score")  arr.sort(function(a,b){return b.score-a.score});
     if(tab==="active") arr.sort(function(a,b){return (b.vol+b.tx*10)-(a.vol+a.tx*10)});
     if(tab==="fresh")  arr.sort(function(a,b){return b.freshScore-a.freshScore});
     if(tab==="surge")  arr.sort(function(a,b){return b.chg-a.chg});
     return arr.slice(0, TOP_N);
+  }
+  // which underlying field the "Score/metric" column represents per tab
+  function metricKeyFor(tab){
+    return ({score:"score", active:"tx", fresh:"freshScore", surge:"chg"})[tab] || "score";
   }
 
   // ─────────────────────────────────────────────
@@ -609,7 +638,7 @@
     thScore.textContent = ({score:"Score",active:"Txns 24h",fresh:"Age",surge:"24h"})[current];
 
     if(!list.length){
-      tbody.innerHTML = '<tr><td colspan="6"><div class="state">'+
+      tbody.innerHTML = '<tr><td colspan="9"><div class="state">'+
         '<div class="big">Nothing here</div>'+
         (query? 'No token matches "'+esc(query)+'". Clear the filter to see the full board.'
               : 'No data returned. Hit refresh to try again.')+
@@ -638,8 +667,11 @@
           '<div class="tok-txt"><div class="tok-sym">'+badge+esc(t.sym)+washTag+'</div>'+
           '<div class="tok-name">'+esc(t.name)+'</div></div></div></td>'+
         metricCell(current, t)+
+        '<td class="col-mcap num">'+fmtUsd(t.mcap)+'</td>'+
         '<td class="col-liq num">'+fmtUsd(t.liq)+'</td>'+
         '<td class="col-vol num">'+fmtUsd(t.vol)+'</td>'+
+        '<td class="col-5m chg '+(t.chg5m>=0?"up":"down")+'">'+fmtChg(t.chg5m)+'</td>'+
+        '<td class="col-1h chg '+(t.chg1h>=0?"up":"down")+'">'+fmtChg(t.chg1h)+'</td>'+
         '<td class="chg '+(t.chg>=0?"up":"down")+'">'+fmtChg(t.chg)+'</td>'+
       '</tr>';
     }).join("");
@@ -650,12 +682,12 @@
 
   function showSkeleton(){
     var rows = "";
-    for(var i=0;i<10;i++) rows += '<tr><td colspan="6" class="skel"><div class="skel-row"></div></td></tr>';
+    for(var i=0;i<10;i++) rows += '<tr><td colspan="9" class="skel"><div class="skel-row"></div></td></tr>';
     tbody.innerHTML = rows;
   }
 
   function showError(){
-    tbody.innerHTML = '<tr><td colspan="6"><div class="state err">'+
+    tbody.innerHTML = '<tr><td colspan="9"><div class="state err">'+
       '<div class="big">Couldn\'t load the board</div>'+
       'DexScreener didn\'t respond. This is usually a network hiccup or a rate limit — give it a moment.'+
       '<br><button id="retry">Retry now</button></div></td></tr>';
@@ -712,8 +744,32 @@
     document.querySelectorAll(".tab").forEach(function(t){t.classList.remove("active")});
     b.classList.add("active");
     current = b.getAttribute("data-tab");
+    sortKey = null;   // switching tabs returns to that tab's default sort
+    updateSortIndicators();
     render();
   });
+
+  // Column-header click sorting
+  var thead = document.querySelector("thead");
+  if(thead){
+    thead.addEventListener("click", function(e){
+      var th = e.target.closest("th.sortable");
+      if(!th) return;
+      var key = th.getAttribute("data-sort");
+      if(sortKey === key){ sortDir = -sortDir; }   // toggle direction
+      else { sortKey = key; sortDir = -1; }         // new column, default desc
+      updateSortIndicators();
+      render();
+    });
+  }
+  function updateSortIndicators(){
+    document.querySelectorAll("th.sortable").forEach(function(th){
+      th.classList.remove("sort-asc","sort-desc");
+      if(sortKey && th.getAttribute("data-sort") === sortKey){
+        th.classList.add(sortDir === -1 ? "sort-desc" : "sort-asc");
+      }
+    });
+  }
 
   document.getElementById("search").addEventListener("input", function(e){
     query = e.target.value.trim();
