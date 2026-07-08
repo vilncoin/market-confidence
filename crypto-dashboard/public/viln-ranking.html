@@ -504,6 +504,18 @@
     var buys = p.txns && p.txns.h24 ? num(p.txns.h24.buys) : 0;
     var sells = p.txns && p.txns.h24 ? num(p.txns.h24.sells) : 0;
     var tx  = buys + sells;
+
+    // ── TEMP DIAGNOSTIC: log tokens that have volume but no buy/sell data ──
+    if(tx === 0 && num(p.volume && p.volume.h24) > 0){
+      if(!window.__bsDiag) window.__bsDiag = 0;
+      if(window.__bsDiag < 5){
+        window.__bsDiag++;
+        console.log("[BS-DIAG]", (p.baseToken && p.baseToken.symbol),
+          "| txns =", JSON.stringify(p.txns),
+          "| volume =", JSON.stringify(p.volume));
+      }
+    }
+    // ── END DIAGNOSTIC ──
     var info = p.info || {};
     return {
       addr: p.pairAddress,
