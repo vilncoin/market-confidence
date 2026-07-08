@@ -290,6 +290,9 @@
   // Dead-pool guard: if 24h volume is under this fraction of liquidity, the pool
   // is parked money with almost no trading — drop it (e.g. BILLY: $6K vol / $840K liq).
   var MIN_VOL_LIQ = 0.03; // volume must be ≥ 3% of liquidity
+  // New Gems tab only shows tokens younger than this (days). Older boosted coins
+  // won't leak into "New" just because they paid for boosts.
+  var MAX_FRESH_DAYS = 7;
   // Wash-trading suspicion: volume/liquidity ratio above this looks inflated.
   var WASH_RATIO = 40;    // volume/liquidity above this is suspicious...
   var WASH_CHG = 8;       // ...but only if price barely moved (±8%). Real pumps get a pass.
@@ -579,6 +582,10 @@
   // ─────────────────────────────────────────────
   function sortFor(tab, list){
     var arr = list.slice();
+    // New Gems: restrict to genuinely young tokens (age known and under the cap).
+    if(tab==="fresh"){
+      arr = arr.filter(function(t){ return isFinite(t.ageDays) && t.ageDays <= MAX_FRESH_DAYS; });
+    }
     // Column-click override takes precedence over the tab's default sort.
     if(sortKey){
       var key = sortKey === "metric" ? metricKeyFor(tab) : sortKey;
