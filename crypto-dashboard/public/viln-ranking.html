@@ -288,9 +288,14 @@
 
   // ── Trust filters ──────────────────────────────────────────
   // Tokens below these floors are dropped as dust / dead / rug-prone.
+  // Strict floors — used by Trending / Volume / Pumping.
   var MIN_LIQ = 10000;    // $10K minimum pool liquidity
   var MIN_VOL = 5000;     // $5K minimum 24h volume
   var MIN_TX  = 30;       // at least 30 trades in 24h (alive)
+  // Loose floors — New Gems only, for early discovery of fresh coins.
+  var GEM_MIN_LIQ = 3000;
+  var GEM_MIN_VOL = 1500;
+  var GEM_MIN_TX  = 15;
   // Dead-pool guard: if 24h volume is under this fraction of liquidity, the pool
   // is parked money with almost no trading — drop it (e.g. BILLY: $6K vol / $840K liq).
   var MIN_VOL_LIQ = 0.03; // volume must be ≥ 3% of liquidity
@@ -488,10 +493,12 @@
         }
       });
 
-      // Step 3 — trust floors: drop dust / dead / rug-prone tokens.
+      // Step 3 — trust floors: drop only dust / dead / rug-prone tokens.
+      // Use the LOOSE floors here so fresh coins reach the pool for New Gems;
+      // stricter tabs re-filter in sortFor. Dead-pool guard always applies.
       return Object.keys(bySym).map(function(k){ return bySym[k]; })
         .filter(function(t){
-          return t.liq >= MIN_LIQ && t.vol >= MIN_VOL && t.tx >= MIN_TX
+          return t.liq >= GEM_MIN_LIQ && t.vol >= GEM_MIN_VOL && t.tx >= GEM_MIN_TX
               && (t.liq <= 0 || t.vol / t.liq >= MIN_VOL_LIQ);
         });
     });
@@ -600,6 +607,10 @@
   // ─────────────────────────────────────────────
   function sortFor(tab, list){
     var arr = list.slice();
+    // Non-New-Gems tabs use the strict floors (the pool was loosened for discovery).
+    if(tab!=="fresh"){
+      arr = arr.filter(function(t){ return t.liq >= MIN_LIQ && t.vol >= MIN_VOL && t.tx >= MIN_TX; });
+    }
     // New Gems: restrict to genuinely young tokens (age known and under the cap).
     if(tab==="fresh"){
       arr = arr.filter(function(t){ return isFinite(t.ageDays) && t.ageDays <= MAX_FRESH_DAYS; });
