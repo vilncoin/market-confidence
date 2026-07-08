@@ -365,7 +365,7 @@
 
   // ── Boosted / trending source ──────────────────────────────
   // 1) pull boosted token lists (addresses only, no price data)
-  // 2) resolve those addresses to full pair data via tokens/v1
+  // 2) resolve those addresses to full pair data via the search endpoint
   function fetchBoostList(url){
     return fetch(url).then(function(r){
       if(!r.ok) throw new Error("HTTP "+r.status);
@@ -383,22 +383,33 @@
   }
 
   function fetchPairsForTokens(addrs){
-    // tokens/v1 accepts up to 30 comma-separated addresses per call
-    var chunks = [];
-    for(var i=0;i<addrs.length;i+=30) chunks.push(addrs.slice(i,i+30));
-    return chunks.reduce(function(chain, chunk){
-      return chain.then(function(acc){
-        var url = "https://api.dexscreener.com/tokens/v1/"+CHAIN+"/"+chunk.join(",");
+    // Resolve each boosted token address to full pair data.
+    // We query the search endpoint per address because its response reliably
+    // includes txns (buys/sells); the tokens/v1 endpoint often omits them.
+    // For each token we keep only its deepest-liquidity solana pair.
+    var out = [];
+    return addrs.reduce(function(chain, addr){
+      return chain.then(function(){
+        var url = "https://api.dexscreener.com/latest/dex/search?q=" + encodeURIComponent(addr);
         return fetch(url).then(function(r){
-          return r.ok ? r.json() : [];
-        }).then(function(arr){
-          return acc.concat(Array.isArray(arr)?arr:[]);
-        }).catch(function(){ return acc; })
-          .then(function(a){
-            return new Promise(function(res){ setTimeout(function(){res(a);}, 120); });
+          return r.ok ? r.json() : null;
+        }).then(function(j){
+          var pairs = (j && j.pairs) ? j.pairs : [];
+          // pick the deepest-liquidity solana pair whose base token matches addr
+          var best = null;
+          pairs.forEach(function(p){
+            if(!p || p.chainId !== CHAIN) return;
+            if(!(p.baseToken && p.baseToken.address === addr)) return;
+            var liq = (p.liquidity && p.liquidity.usd) || 0;
+            if(!best || liq > ((best.liquidity && best.liquidity.usd) || 0)) best = p;
+          });
+          if(best) out.push(best);
+        }).catch(function(){})
+          .then(function(){
+            return new Promise(function(res){ setTimeout(res, 80); });
           });
       });
-    }, Promise.resolve([]));
+    }, Promise.resolve()).then(function(){ return out; });
   }
 
   function loadBoosted(){
@@ -413,6 +424,9 @@
       });
       var addrs = Object.keys(boostBy);
       if(!addrs.length) return [];
+      // sort by boost strength, resolve only the strongest to cap request count
+      addrs.sort(function(a,b){ return boostBy[b] - boostBy[a]; });
+      addrs = addrs.slice(0, 25);
       return fetchPairsForTokens(addrs).then(function(pairs){
         return pairs.map(function(p){
           var ta = p.baseToken && p.baseToken.address;
