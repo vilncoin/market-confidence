@@ -141,6 +141,13 @@
   .tok-name{font-size:10px;color:var(--ink-faint);
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
 
+  /* trust badge + wash warning */
+  .trust{font-size:8px;margin-right:5px;vertical-align:middle;line-height:1;cursor:help}
+  .trust-hi{color:#8CD32E;text-shadow:0 0 6px rgba(140,211,46,.5)}
+  .trust-mid{color:#e2b93b}
+  .trust-lo{color:#ff5470}
+  .wash{color:#e2b93b;font-size:11px;margin-left:5px;cursor:help;vertical-align:middle}
+
   .score{font-family:var(--mono);color:var(--toxic);font-weight:700}
   .num{font-family:var(--mono);color:var(--ink-dim)}
   .chg{font-family:var(--mono);font-weight:600}
@@ -176,6 +183,13 @@
   }
   .foot a{color:var(--ink-dim);text-decoration:none}
   .foot a:hover{color:var(--toxic)}
+
+  .legend{
+    display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+    margin-top:12px;font-size:10px;color:var(--ink-faint);
+    font-family:var(--mono);letter-spacing:.03em;
+  }
+  .legend .trust,.legend .wash{margin:0 3px 0 0}
 
   /* mobile: hide liquidity + volume columns on narrow screens */
   @media (max-width:560px){
@@ -230,6 +244,12 @@
     </table>
   </div>
 
+  <div class="legend">
+    <span class="trust trust-hi">●</span> Solid
+    <span class="trust trust-mid">●</span> Caution
+    <span class="trust trust-lo">●</span> Risky
+    <span class="wash">⚠</span> Possible wash trading
+  </div>
   <div class="foot">
     <span id="status">Loading…</span>
     <span>Data: <a href="https://dexscreener.com" target="_blank" rel="noopener">DexScreener</a> · Solana</span>
@@ -248,6 +268,14 @@
   var TOP_N = 50;
   // Weights for the overall VILN Score
   var W = { vol:0.35, liq:0.25, mom:0.20, part:0.20 };
+
+  // ── Trust filters ──────────────────────────────────────────
+  // Tokens below these floors are dropped as dust / dead / rug-prone.
+  var MIN_LIQ = 10000;    // $10K minimum pool liquidity
+  var MIN_VOL = 5000;     // $5K minimum 24h volume
+  var MIN_TX  = 30;       // at least 30 trades in 24h (alive)
+  // Wash-trading suspicion: volume/liquidity ratio above this looks inflated.
+  var WASH_RATIO = 15;
 
   // Seed tokens to pull. DexScreener's public search/pairs endpoints are keyless.
   // We search a few Solana-relevant terms and merge unique pairs.
@@ -424,7 +452,11 @@
         }
       });
 
-      return Object.keys(bySym).map(function(k){ return bySym[k]; });
+      // Step 3 — trust floors: drop dust / dead / rug-prone tokens.
+      return Object.keys(bySym).map(function(k){ return bySym[k]; })
+        .filter(function(t){
+          return t.liq >= MIN_LIQ && t.vol >= MIN_VOL && t.tx >= MIN_TX;
+        });
     });
   }
 
@@ -451,32 +483,44 @@
   function num(v){ var n = parseFloat(v); return isFinite(n) ? n : 0; }
 
   // ─────────────────────────────────────────────
-  // Scoring (0-100 normalized within current set)
+  // Scoring — absolute reference scale (stable across refreshes)
+  // Each metric maps to 0..1 against a FIXED anchor, not the current set's max,
+  // so a token's score doesn't swing just because the field changed.
   // ─────────────────────────────────────────────
+  // Anchors: the value that counts as "excellent" (=> ~1.0) on a log scale.
+  var ANCHOR = { vol: 5e6, liq: 2e6, tx: 5000, boost: 100 };
+
+  function scaleLog(v, anchor){ return clamp(ln(v)/ln(anchor), 0, 1); }
+
   function computeScores(list){
-    var maxVol = Math.max.apply(null, list.map(function(t){return t.vol}).concat(1));
-    var maxLiq = Math.max.apply(null, list.map(function(t){return t.liq}).concat(1));
-    var maxTx  = Math.max.apply(null, list.map(function(t){return t.tx}).concat(1));
-    var maxBoost = Math.max.apply(null, list.map(function(t){return t.boost}).concat(1));
     var now = Date.now();
     list.forEach(function(t){
-      // log-scale the heavy-tailed metrics so a few whales don't flatten everyone
-      var volN = ln(t.vol)/ln(maxVol);
-      var liqN = ln(t.liq)/ln(maxLiq);
-      var txN  = ln(t.tx)/ln(maxTx);
-      // momentum: map 24h change (-100..+100+) to 0..1, clamped
+      // absolute log-scaled metrics (0..1)
+      var volN = scaleLog(t.vol, ANCHOR.vol);
+      var liqN = scaleLog(t.liq, ANCHOR.liq);
+      var txN  = scaleLog(t.tx,  ANCHOR.tx);
       var momN = clamp((t.chg + 50) / 150, 0, 1);
       t.score = Math.round(
         (W.vol*volN + W.liq*liqN + W.mom*momN + W.part*txN) * 1000
-      ) / 10; // one decimal, 0-100 scale
+      ) / 10;
 
-      // FRESH score: freshness (newer pair = higher) blended with trending (boosts).
-      // freshness decays over 7 days; boosts add a trending kick.
+      // ── Trust score (0..100): depth + real activity, penalized for wash risk ──
+      // Healthy tokens have solid liquidity AND proportionate trade count.
+      t.washRatio = t.liq > 0 ? (t.vol / t.liq) : 999;
+      t.wash = t.washRatio > WASH_RATIO;             // volume dwarfs liquidity → suspicious
+      var depth = scaleLog(t.liq, ANCHOR.liq);
+      var activity = scaleLog(t.tx, ANCHOR.tx);
+      var washPenalty = t.wash ? 0.35 : 0;           // knock down suspected wash trading
+      t.trust = Math.round(clamp(0.55*depth + 0.45*activity - washPenalty, 0, 1) * 100);
+      t.trustTier = t.trust >= 66 ? "hi" : (t.trust >= 33 ? "mid" : "lo");
+
+      // ── FRESH score: freshness blended with trending (boost weight lowered) ──
       var ageMs = t.createdAt ? (now - t.createdAt) : Infinity;
       var ageDays = ageMs / 86400000;
-      var freshN = isFinite(ageDays) ? clamp(1 - ageDays/7, 0, 1) : 0;   // 0..1, 0 if >7d or unknown
-      var boostN = ln(t.boost)/ln(maxBoost);                             // 0..1
-      t.freshScore = Math.round((0.6*freshN + 0.4*boostN) * 1000) / 10;
+      var freshN = isFinite(ageDays) ? clamp(1 - ageDays/7, 0, 1) : 0;
+      var boostN = scaleLog(t.boost, ANCHOR.boost);
+      // freshness 60% · real activity 20% · boost(paid ad) only 20%
+      t.freshScore = Math.round((0.6*freshN + 0.2*activity + 0.2*boostN) * 1000) / 10;
       t.ageDays = ageDays;
     });
   }
@@ -562,10 +606,12 @@
       var icon = t.img
         ? '<img class="tok-ic" src="'+esc(t.img)+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
         : '<span class="tok-ic"></span>';
+      var badge = '<span class="trust trust-'+t.trustTier+'" title="Trust '+t.trust+'/100 · liquidity depth + real activity">●</span>';
+      var washTag = t.wash ? '<span class="wash" title="Volume is very high vs liquidity — possible wash trading">⚠</span>' : '';
       return '<tr class="'+flash+'" data-url="'+esc(t.url)+'">'+
         '<td class="'+rankCls+'">'+(i+1)+'</td>'+
         '<td class="l"><div class="tok">'+icon+
-          '<div class="tok-txt"><div class="tok-sym">'+esc(t.sym)+'</div>'+
+          '<div class="tok-txt"><div class="tok-sym">'+badge+esc(t.sym)+washTag+'</div>'+
           '<div class="tok-name">'+esc(t.name)+'</div></div></div></td>'+
         metricCell(current, t)+
         '<td class="col-liq num">'+fmtUsd(t.liq)+'</td>'+
