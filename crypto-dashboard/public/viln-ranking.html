@@ -205,7 +205,7 @@
   <div class="tabs" id="tabs">
     <button class="tab active" data-tab="score">Overall<small>VILN Score</small></button>
     <button class="tab" data-tab="active">Active<small>Volume + Txns</small></button>
-    <button class="tab" data-tab="stable">Stable<small>Liquidity</small></button>
+    <button class="tab" data-tab="fresh">Fresh<small>New + Trending</small></button>
     <button class="tab" data-tab="surge">Surge<small>24h Change</small></button>
   </div>
 
@@ -262,7 +262,20 @@
   ];
   var CHAIN = "solana";
   // Symbols to exclude from the board (majors / infra tokens, case-insensitive)
-  var EXCLUDE = ["SOL","WSOL","PUMP","USDC","USDT","JUP","RAY","JLP","MSOL","JITOSOL","BSOL"];
+  // Symbols to exclude (case-insensitive) — keep the board pure memecoins.
+  var EXCLUDE = [
+    // majors / infra
+    "SOL","WSOL","PUMP","JUP","RAY","JLP","JTO","ORCA","PYTH","W","DRIFT",
+    "KMNO","CLOUD","MPLX","TNSR","RENDER","RNDR","HNT","MOBILE","IOT","IO",
+    "GRASS","ZEUS","METEORA","MET",
+    // stablecoins / wrapped / liquid-staking
+    "USDC","USDT","USDS","PYUSD","USDH","UXD","EURC","DAI","FDUSD",
+    "MSOL","JITOSOL","BSOL","STSOL","INF","HSOL","BNSOL","JUPSOL","CBBTC",
+    "WBTC","WETH","BTC","ETH","ZBTC",
+    // bridged impostors from other chains
+    "XRP","DOGE","SHIB","PEPE","ADA","LINK","AVAX","MATIC","BNB","TRX",
+    "LTC","DOT","UNI","ATOM","NEAR","APT","SUI","TON","FLOKI","BABYDOGE"
+  ];
 
   // ─────────────────────────────────────────────
   // State
@@ -291,6 +304,66 @@
       .catch(function(){ return []; });
   }
 
+  // ── Boosted / trending source ──────────────────────────────
+  // 1) pull boosted token lists (addresses only, no price data)
+  // 2) resolve those addresses to full pair data via tokens/v1
+  function fetchBoostList(url){
+    return fetch(url).then(function(r){
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      return r.json();
+    }).then(function(arr){
+      arr = Array.isArray(arr) ? arr : [];
+      var out = [];
+      arr.forEach(function(b){
+        if(b && b.chainId === CHAIN && b.tokenAddress){
+          out.push({ addr: b.tokenAddress, boost: num(b.amount) || num(b.totalAmount) || 1 });
+        }
+      });
+      return out;
+    }).catch(function(){ return []; });
+  }
+
+  function fetchPairsForTokens(addrs){
+    // tokens/v1 accepts up to 30 comma-separated addresses per call
+    var chunks = [];
+    for(var i=0;i<addrs.length;i+=30) chunks.push(addrs.slice(i,i+30));
+    return chunks.reduce(function(chain, chunk){
+      return chain.then(function(acc){
+        var url = "https://api.dexscreener.com/tokens/v1/"+CHAIN+"/"+chunk.join(",");
+        return fetch(url).then(function(r){
+          return r.ok ? r.json() : [];
+        }).then(function(arr){
+          return acc.concat(Array.isArray(arr)?arr:[]);
+        }).catch(function(){ return acc; })
+          .then(function(a){
+            return new Promise(function(res){ setTimeout(function(){res(a);}, 120); });
+          });
+      });
+    }, Promise.resolve([]));
+  }
+
+  function loadBoosted(){
+    // merge "top" (most active boosts) + "latest" (freshly boosted)
+    return Promise.all([
+      fetchBoostList("https://api.dexscreener.com/token-boosts/top/v1"),
+      fetchBoostList("https://api.dexscreener.com/token-boosts/latest/v1")
+    ]).then(function(res){
+      var boostBy = {};
+      res[0].concat(res[1]).forEach(function(b){
+        if(!boostBy[b.addr] || b.boost > boostBy[b.addr]) boostBy[b.addr] = b.boost;
+      });
+      var addrs = Object.keys(boostBy);
+      if(!addrs.length) return [];
+      return fetchPairsForTokens(addrs).then(function(pairs){
+        return pairs.map(function(p){
+          var ta = p.baseToken && p.baseToken.address;
+          if(ta && boostBy[ta]){ p.boosts = { active: boostBy[ta] }; }
+          return p;
+        });
+      });
+    }).catch(function(){ return []; });
+  }
+
   function fetchInBatches(terms, size){
     var out = [];
     var chunks = [];
@@ -306,7 +379,13 @@
   }
 
   function loadAll(){
-    return fetchInBatches(SEARCH_TERMS, 8).then(function(lists){
+    return Promise.all([
+      fetchInBatches(SEARCH_TERMS, 8),
+      loadBoosted()
+    ]).then(function(sources){
+      // sources[0] = array of pair-arrays (from search)
+      // sources[1] = flat array of pairs (from boosts/trending)
+      var lists = sources[0].concat([ sources[1] ]);
       // Step 1 — collapse to one row per TOKEN address (sum flow across its pools).
       var byToken = {};
       lists.forEach(function(pairs){
@@ -323,6 +402,8 @@
           } else {
             cur.vol += n.vol;
             cur.tx  += n.tx;
+            if(n.boost > cur.boost) cur.boost = n.boost;
+            if(n.createdAt && (!cur.createdAt || n.createdAt < cur.createdAt)) cur.createdAt = n.createdAt;
             if(n.liq > cur.liq){
               cur.liq = n.liq; cur.chg = n.chg; cur.price = n.price;
               cur.url = n.url; cur.addr = n.addr;
@@ -361,7 +442,9 @@
       name: (p.baseToken && p.baseToken.name) || "",
       img: info.imageUrl || "",
       vol: vol, liq: liq, chg: chg, tx: tx,
-      price: num(p.priceUsd)
+      price: num(p.priceUsd),
+      createdAt: num(p.pairCreatedAt),
+      boost: (p.boosts && num(p.boosts.active)) || 0
     };
   }
 
@@ -374,6 +457,8 @@
     var maxVol = Math.max.apply(null, list.map(function(t){return t.vol}).concat(1));
     var maxLiq = Math.max.apply(null, list.map(function(t){return t.liq}).concat(1));
     var maxTx  = Math.max.apply(null, list.map(function(t){return t.tx}).concat(1));
+    var maxBoost = Math.max.apply(null, list.map(function(t){return t.boost}).concat(1));
+    var now = Date.now();
     list.forEach(function(t){
       // log-scale the heavy-tailed metrics so a few whales don't flatten everyone
       var volN = ln(t.vol)/ln(maxVol);
@@ -384,6 +469,15 @@
       t.score = Math.round(
         (W.vol*volN + W.liq*liqN + W.mom*momN + W.part*txN) * 1000
       ) / 10; // one decimal, 0-100 scale
+
+      // FRESH score: freshness (newer pair = higher) blended with trending (boosts).
+      // freshness decays over 7 days; boosts add a trending kick.
+      var ageMs = t.createdAt ? (now - t.createdAt) : Infinity;
+      var ageDays = ageMs / 86400000;
+      var freshN = isFinite(ageDays) ? clamp(1 - ageDays/7, 0, 1) : 0;   // 0..1, 0 if >7d or unknown
+      var boostN = ln(t.boost)/ln(maxBoost);                             // 0..1
+      t.freshScore = Math.round((0.6*freshN + 0.4*boostN) * 1000) / 10;
+      t.ageDays = ageDays;
     });
   }
   function ln(v){ return Math.log(1 + Math.max(0,v)); }
@@ -396,7 +490,7 @@
     var arr = list.slice();
     if(tab==="score")  arr.sort(function(a,b){return b.score-a.score});
     if(tab==="active") arr.sort(function(a,b){return (b.vol+b.tx*10)-(a.vol+a.tx*10)});
-    if(tab==="stable") arr.sort(function(a,b){return b.liq-a.liq});
+    if(tab==="fresh")  arr.sort(function(a,b){return b.freshScore-a.freshScore});
     if(tab==="surge")  arr.sort(function(a,b){return b.chg-a.chg});
     return arr.slice(0, TOP_N);
   }
@@ -415,6 +509,12 @@
     if(!isFinite(v)||v===0) return "0.0%";
     return (v>0?"+":"")+v.toFixed(1)+"%";
   }
+  function fmtAge(days){
+    if(!isFinite(days)) return "—";
+    if(days < 1){ var h = Math.max(1, Math.round(days*24)); return h+"h"; }
+    if(days < 30) return Math.round(days)+"d";
+    return Math.round(days/30)+"mo";
+  }
   function esc(s){ return String(s).replace(/[&<>"]/g,function(c){
     return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
 
@@ -422,7 +522,7 @@
     // primary metric shown in the "Score" column changes per tab
     if(tab==="score")  return '<td class="score">'+t.score.toFixed(1)+'</td>';
     if(tab==="active") return '<td class="num">'+ (t.tx>0? t.tx.toLocaleString():"—") +'</td>';
-    if(tab==="stable") return '<td class="score">'+fmtUsd(t.liq)+'</td>';
+    if(tab==="fresh")  return '<td class="score">'+fmtAge(t.ageDays)+'</td>';
     if(tab==="surge")  return '<td class="chg '+(t.chg>=0?"up":"down")+'">'+fmtChg(t.chg)+'</td>';
     return '<td class="num">—</td>';
   }
@@ -438,7 +538,7 @@
     }
 
     // header label per tab
-    thScore.textContent = ({score:"Score",active:"Txns 24h",stable:"Liquidity",surge:"24h"})[current];
+    thScore.textContent = ({score:"Score",active:"Txns 24h",fresh:"Age",surge:"24h"})[current];
 
     if(!list.length){
       tbody.innerHTML = '<tr><td colspan="6"><div class="state">'+
