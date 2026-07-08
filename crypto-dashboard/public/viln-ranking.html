@@ -266,7 +266,6 @@
     <span class="trust trust-mid">●</span> Caution
     <span class="trust trust-lo">●</span> Risky
     <span class="whale">🐋</span> Whale activity
-    <span class="whale">🐢</span> Retail / quiet
   </div>
   <div class="foot">
     <span id="status">Loading…</span>
@@ -301,11 +300,6 @@
   // Whale activity: average trade size (24h volume ÷ trade count) at or above
   // this suggests large orders (whales) rather than retail. $2K per trade.
   var WHALE_AVG_TRADE = 2000;
-  // Turtle: very small average trade — retail-only, slow/quiet market. Under $150.
-  var TURTLE_AVG_TRADE = 150;
-  // Below this, average trades are so tiny they're likely bots, not real retail —
-  // don't tag those as turtle (leave them unmarked).
-  var BOT_AVG_TRADE = 30;
   // Wash-trading suspicion: volume/liquidity ratio above this looks inflated.
   var WASH_RATIO = 40;    // volume/liquidity above this is suspicious...
   var WASH_CHG = 8;       // ...but only if price barely moved (±8%). Real pumps get a pass.
@@ -593,8 +587,6 @@
       // Big average ticket = few large orders = whales moving. Small = retail.
       t.avgTrade = t.tx > 0 ? (t.vol / t.tx) : 0;
       t.whale = t.avgTrade >= WHALE_AVG_TRADE;
-      // turtle only in the real-retail band: small tickets, but not bot-tiny
-      t.turtle = t.avgTrade >= BOT_AVG_TRADE && t.avgTrade < TURTLE_AVG_TRADE;
     });
   }
   function ln(v){ return Math.log(1 + Math.max(0,v)); }
@@ -704,9 +696,7 @@
       var badge = '<span class="trust trust-'+t.trustTier+'" title="Trust '+t.trust+'/100 · liquidity depth + real activity">●</span>';
       var sizeTag = t.whale
         ? '<span class="whale" title="Large average trade size ('+fmtUsd(t.avgTrade)+'/trade) — whales active">🐋</span>'
-        : (t.turtle
-          ? '<span class="whale" title="Tiny average trade size ('+fmtUsd(t.avgTrade)+'/trade) — retail only, quiet market">🐢</span>'
-          : '');
+        : '';
       return '<tr class="'+flash+'" data-url="'+esc(t.url)+'">'+
         '<td class="'+rankCls+'">'+(i+1)+'</td>'+
         '<td class="l"><div class="tok">'+icon+
