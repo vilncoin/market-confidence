@@ -275,7 +275,8 @@
   var MIN_VOL = 5000;     // $5K minimum 24h volume
   var MIN_TX  = 30;       // at least 30 trades in 24h (alive)
   // Wash-trading suspicion: volume/liquidity ratio above this looks inflated.
-  var WASH_RATIO = 15;
+  var WASH_RATIO = 40;    // volume/liquidity above this is suspicious...
+  var WASH_CHG = 8;       // ...but only if price barely moved (±8%). Real pumps get a pass.
 
   // Seed tokens to pull. DexScreener's public search/pairs endpoints are keyless.
   // We search a few Solana-relevant terms and merge unique pairs.
@@ -507,7 +508,9 @@
       // ── Trust score (0..100): depth + real activity, penalized for wash risk ──
       // Healthy tokens have solid liquidity AND proportionate trade count.
       t.washRatio = t.liq > 0 ? (t.vol / t.liq) : 999;
-      t.wash = t.washRatio > WASH_RATIO;             // volume dwarfs liquidity → suspicious
+      // Suspicious only when volume dwarfs liquidity AND price barely moved.
+      // A big genuine pump/dump moves the price, so we give those a pass.
+      t.wash = t.washRatio > WASH_RATIO && Math.abs(t.chg) < WASH_CHG;
       var depth = scaleLog(t.liq, ANCHOR.liq);
       var activity = scaleLog(t.tx, ANCHOR.tx);
       var washPenalty = t.wash ? 0.35 : 0;           // knock down suspected wash trading
