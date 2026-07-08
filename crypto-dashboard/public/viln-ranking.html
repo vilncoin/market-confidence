@@ -332,6 +332,7 @@
   var query = "";
   var sortKey = null;   // column-click override; null = use tab default
   var sortDir = -1;     // -1 desc, 1 asc
+  var shownCount = 0;   // rows actually visible after tab/filter
   var lastRanks = {};      // { tabKey: { pairAddr: rankIndex } }
   var dataCache = [];      // last processed token list
   var timer = null, cd = REFRESH_SEC, cdTimer = null;
@@ -586,6 +587,14 @@
     if(tab==="fresh"){
       arr = arr.filter(function(t){ return isFinite(t.ageDays) && t.ageDays <= MAX_FRESH_DAYS; });
     }
+    // Pumping: drop early-listing fake spikes — a huge % on a brand-new pair is
+    // usually just price discovery, not a real pump. (< 2h old AND > 1000%.)
+    if(tab==="surge"){
+      arr = arr.filter(function(t){
+        var tooYoung = isFinite(t.ageDays) && t.ageDays < (2/24);
+        return !(tooYoung && t.chg > 1000);
+      });
+    }
     // Column-click override takes precedence over the tab's default sort.
     if(sortKey){
       var key = sortKey === "metric" ? metricKeyFor(tab) : sortKey;
@@ -689,6 +698,11 @@
 
     tbody.innerHTML = rows;
     lastRanks[current] = nextRanks;
+    shownCount = list.length;
+    if(dataCache.length){
+      statusEl.textContent = shownCount+" tokens · "+
+        ({score:"Trending",fresh:"New Gems",active:"Volume",surge:"Pumping"})[current];
+    }
   }
 
   function showSkeleton(){
@@ -723,7 +737,7 @@
       dataCache = list;
       render();
       var now = new Date();
-      statusEl.textContent = list.length+" pairs · updated "+
+      statusEl.textContent = shownCount+" tokens · updated "+
         now.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});
     }).catch(function(){
       if(!dataCache.length) showError();
