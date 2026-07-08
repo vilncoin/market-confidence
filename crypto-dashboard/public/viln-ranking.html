@@ -490,8 +490,29 @@
   // ─────────────────────────────────────────────
   // Anchors: the value that counts as "excellent" (=> ~1.0) on a log scale.
   var ANCHOR = { vol: 5e6, liq: 2e6, tx: 5000, boost: 100 };
+  // Trust badge uses a memecoin-scale liquidity anchor: ~$1M liq reads as "solid".
+  var TRUST_LIQ_ANCHOR = 1e6;
 
   function scaleLog(v, anchor){ return clamp(ln(v)/ln(anchor), 0, 1); }
+
+  // Liquidity → depth score (0..1), tuned to memecoin reality so tiers actually split:
+  //   >= $1M  → 0.9-1.0 (rock solid)     $500K → ~0.8
+  //   $100K   → ~0.5 (borderline)        $30K  → ~0.3 (thin)
+  //   <= $10K → ~0.1 (dust)
+  function trustDepth(liq){
+    var pts = [[10000,0.10],[30000,0.30],[60000,0.42],[100000,0.52],
+               [250000,0.66],[500000,0.80],[1000000,0.92],[3000000,1.0]];
+    if(liq <= pts[0][0]) return 0.05;
+    if(liq >= pts[pts.length-1][0]) return 1.0;
+    for(var i=0;i<pts.length-1;i++){
+      var a=pts[i], b=pts[i+1];
+      if(liq >= a[0] && liq < b[0]){
+        var f=(Math.log(liq)-Math.log(a[0]))/(Math.log(b[0])-Math.log(a[0]));
+        return a[1] + f*(b[1]-a[1]);
+      }
+    }
+    return 0.5;
+  }
 
   function computeScores(list){
     var now = Date.now();
@@ -505,17 +526,17 @@
         (W.vol*volN + W.liq*liqN + W.mom*momN + W.part*txN) * 1000
       ) / 10;
 
-      // ── Trust score (0..100): depth + real activity, penalized for wash risk ──
-      // Healthy tokens have solid liquidity AND proportionate trade count.
+      // ── Trust score (0..100): mostly liquidity DEPTH, some real activity ──
+      // Depth is scored on a memecoin-scale anchor so shallow tokens actually
+      // fall into mid/lo tiers instead of all riding activity up to green.
       t.washRatio = t.liq > 0 ? (t.vol / t.liq) : 999;
-      // Suspicious only when volume dwarfs liquidity AND price barely moved.
-      // A big genuine pump/dump moves the price, so we give those a pass.
       t.wash = t.washRatio > WASH_RATIO && Math.abs(t.chg) < WASH_CHG;
-      var depth = scaleLog(t.liq, ANCHOR.liq);
+      var depth = trustDepth(t.liq);                  // stricter liquidity curve
       var activity = scaleLog(t.tx, ANCHOR.tx);
-      var washPenalty = t.wash ? 0.35 : 0;           // knock down suspected wash trading
-      t.trust = Math.round(clamp(0.55*depth + 0.45*activity - washPenalty, 0, 1) * 100);
-      t.trustTier = t.trust >= 66 ? "hi" : (t.trust >= 33 ? "mid" : "lo");
+      var washPenalty = t.wash ? 0.35 : 0;
+      // depth dominates (0.75) so liquidity separates the tiers; activity is a minor lift
+      t.trust = Math.round(clamp(0.75*depth + 0.25*activity - washPenalty, 0, 1) * 100);
+      t.trustTier = t.trust >= 70 ? "hi" : (t.trust >= 40 ? "mid" : "lo");
 
       // ── FRESH score: freshness blended with trending (boost weight lowered) ──
       var ageMs = t.createdAt ? (now - t.createdAt) : Infinity;
