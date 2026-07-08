@@ -152,6 +152,13 @@
   .trust-lo{color:#ff5470}
   .wash{color:#e2b93b;font-size:11px;margin-left:5px;cursor:help;vertical-align:middle}
 
+  /* buy/sell pressure mini-bar (under token name) */
+  .bs{display:inline-flex;align-items:center;gap:5px;margin-left:8px;vertical-align:middle;cursor:help}
+  .bs-track{display:inline-block;width:46px;height:4px;border-radius:2px;
+    background:var(--down);overflow:hidden}
+  .bs-fill{display:block;height:100%;background:var(--up);border-radius:2px 0 0 2px}
+  .bs-pct{font-family:var(--mono);font-size:9px;color:var(--ink-faint)}
+
   .score{font-family:var(--mono);color:var(--toxic);font-weight:700}
   .num{font-family:var(--mono);color:var(--ink-dim)}
   .chg{font-family:var(--mono);font-weight:600}
@@ -262,6 +269,7 @@
     <span class="trust trust-mid">●</span> Caution
     <span class="trust trust-lo">●</span> Risky
     <span class="wash">⚠</span> Possible wash trading
+    <span class="bs" style="margin-left:0"><span class="bs-track"><span class="bs-fill" style="width:65%"></span></span></span> Buy / sell pressure (24h)
   </div>
   <div class="foot">
     <span id="status">Loading…</span>
@@ -453,6 +461,8 @@
           } else {
             cur.vol += n.vol;
             cur.tx  += n.tx;
+            cur.buys += n.buys;
+            cur.sells += n.sells;
             if(n.boost > cur.boost) cur.boost = n.boost;
             if(n.createdAt && (!cur.createdAt || n.createdAt < cur.createdAt)) cur.createdAt = n.createdAt;
             if(n.liq > cur.liq){
@@ -491,7 +501,9 @@
     var chg = num(p.priceChange && p.priceChange.h24);
     var chg5m = num(p.priceChange && p.priceChange.m5);
     var chg1h = num(p.priceChange && p.priceChange.h1);
-    var tx  = p.txns && p.txns.h24 ? (num(p.txns.h24.buys)+num(p.txns.h24.sells)) : 0;
+    var buys = p.txns && p.txns.h24 ? num(p.txns.h24.buys) : 0;
+    var sells = p.txns && p.txns.h24 ? num(p.txns.h24.sells) : 0;
+    var tx  = buys + sells;
     var info = p.info || {};
     return {
       addr: p.pairAddress,
@@ -501,6 +513,7 @@
       name: (p.baseToken && p.baseToken.name) || "",
       img: info.imageUrl || "",
       vol: vol, liq: liq, chg: chg, chg5m: chg5m, chg1h: chg1h, tx: tx,
+      buys: buys, sells: sells,
       price: num(p.priceUsd),
       mcap: num(p.marketCap) || num(p.fdv),
       createdAt: num(p.pairCreatedAt),
@@ -635,6 +648,16 @@
   function esc(s){ return String(s).replace(/[&<>"]/g,function(c){
     return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
 
+  // Buy/sell pressure mini-bar. Returns "" when there's no trade data.
+  function buySellBar(t){
+    var total = t.buys + t.sells;
+    if(total <= 0) return "";
+    var buyPct = Math.round(t.buys / total * 100);
+    return '<span class="bs" title="'+t.buys.toLocaleString()+' buys · '+t.sells.toLocaleString()+' sells (24h)">'+
+      '<span class="bs-track"><span class="bs-fill" style="width:'+buyPct+'%"></span></span>'+
+      '<span class="bs-pct">'+buyPct+'%</span></span>';
+  }
+
   function metricCell(tab, t){
     // primary metric shown in the "Score" column changes per tab
     if(tab==="score")  return '<td class="score">'+t.score.toFixed(1)+'</td>';
@@ -685,7 +708,7 @@
         '<td class="'+rankCls+'">'+(i+1)+'</td>'+
         '<td class="l"><div class="tok">'+icon+
           '<div class="tok-txt"><div class="tok-sym">'+badge+esc(t.sym)+washTag+'</div>'+
-          '<div class="tok-name">'+esc(t.name)+'</div></div></div></td>'+
+          '<div class="tok-name">'+esc(t.name)+buySellBar(t)+'</div></div></div></td>'+
         metricCell(current, t)+
         '<td class="col-mcap num">'+fmtUsd(t.mcap)+'</td>'+
         '<td class="col-liq num">'+fmtUsd(t.liq)+'</td>'+
