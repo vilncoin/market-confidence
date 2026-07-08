@@ -151,9 +151,7 @@
   .trust-mid{color:#e2b93b}
   .trust-lo{color:#ff5470}
   .wash{color:#e2b93b;font-size:11px;margin-left:5px;cursor:help;vertical-align:middle}
-  .bmap{font-size:11px;margin-left:6px;text-decoration:none;opacity:.4;
-    vertical-align:middle;transition:opacity .15s;cursor:pointer}
-  .bmap:hover{opacity:1}
+  .whale{font-size:11px;margin-left:5px;cursor:help;vertical-align:middle}
 
   .score{font-family:var(--mono);color:var(--toxic);font-weight:700}
   .num{font-family:var(--mono);color:var(--ink-dim)}
@@ -209,7 +207,6 @@
     .col-liq,.col-vol{display:none}
     td,thead th{padding:10px 8px}
     .tok-sym,.tok-name{max-width:108px}
-    .bmap{display:none}
     .tok-ic{width:22px;height:22px}
   }
   @media (max-width:380px){
@@ -269,6 +266,7 @@
     <span class="trust trust-mid">●</span> Caution
     <span class="trust trust-lo">●</span> Risky
     <span class="wash">⚠</span> Possible wash trading
+    <span class="whale">🐋</span> Whale activity
   </div>
   <div class="foot">
     <span id="status">Loading…</span>
@@ -300,6 +298,9 @@
   // New Gems tab only shows tokens younger than this (days). Older boosted coins
   // won't leak into "New" just because they paid for boosts.
   var MAX_FRESH_DAYS = 7;
+  // Whale activity: average trade size (24h volume ÷ trade count) at or above
+  // this suggests large orders (whales) rather than retail. $2K per trade.
+  var WHALE_AVG_TRADE = 2000;
   // Wash-trading suspicion: volume/liquidity ratio above this looks inflated.
   var WASH_RATIO = 40;    // volume/liquidity above this is suspicious...
   var WASH_CHG = 8;       // ...but only if price barely moved (±8%). Real pumps get a pass.
@@ -582,6 +583,11 @@
       // freshness 60% · real activity 20% · boost(paid ad) only 20%
       t.freshScore = Math.round((0.6*freshN + 0.2*activity + 0.2*boostN) * 1000) / 10;
       t.ageDays = ageDays;
+
+      // ── Whale activity: average trade size = volume / trade count ──
+      // Big average ticket = few large orders = whales moving. Small = retail.
+      t.avgTrade = t.tx > 0 ? (t.vol / t.tx) : 0;
+      t.whale = t.avgTrade >= WHALE_AVG_TRADE;
     });
   }
   function ln(v){ return Math.log(1 + Math.max(0,v)); }
@@ -690,13 +696,11 @@
         : '<span class="tok-ic"></span>';
       var badge = '<span class="trust trust-'+t.trustTier+'" title="Trust '+t.trust+'/100 · liquidity depth + real activity">●</span>';
       var washTag = t.wash ? '<span class="wash" title="Volume is very high vs liquidity — possible wash trading">⚠</span>' : '';
-      var bubbleLink = t.tokenAddr
-        ? '<a class="bmap" href="https://app.bubblemaps.io/sol/token/'+esc(t.tokenAddr)+'" target="_blank" rel="noopener" title="View holder bubble map (Bubblemaps)">🫧</a>'
-        : '';
+      var whaleTag = t.whale ? '<span class="whale" title="Large average trade size ('+fmtUsd(t.avgTrade)+'/trade) — whales active">🐋</span>' : '';
       return '<tr class="'+flash+'" data-url="'+esc(t.url)+'">'+
         '<td class="'+rankCls+'">'+(i+1)+'</td>'+
         '<td class="l"><div class="tok">'+icon+
-          '<div class="tok-txt"><div class="tok-sym">'+badge+esc(t.sym)+washTag+bubbleLink+'</div>'+
+          '<div class="tok-txt"><div class="tok-sym">'+badge+esc(t.sym)+washTag+whaleTag+'</div>'+
           '<div class="tok-name">'+esc(t.name)+'</div></div></div></td>'+
         metricCell(current, t)+
         '<td class="col-mcap num">'+fmtUsd(t.mcap)+'</td>'+
@@ -818,8 +822,6 @@
   });
 
   tbody.addEventListener("click", function(e){
-    // clicking the bubble-map link should open Bubblemaps, not DexScreener
-    if(e.target.closest("a.bmap")) return;
     var tr = e.target.closest("tr[data-url]");
     if(!tr) return;
     var url = tr.getAttribute("data-url");
