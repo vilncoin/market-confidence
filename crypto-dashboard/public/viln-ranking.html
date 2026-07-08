@@ -265,7 +265,6 @@
     <span class="trust trust-hi">●</span> Solid
     <span class="trust trust-mid">●</span> Caution
     <span class="trust trust-lo">●</span> Risky
-    <span class="wash">⚠</span> Possible wash trading
     <span class="whale">🐋</span> Whale activity
   </div>
   <div class="foot">
@@ -695,12 +694,11 @@
         ? '<img class="tok-ic" src="'+esc(t.img)+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
         : '<span class="tok-ic"></span>';
       var badge = '<span class="trust trust-'+t.trustTier+'" title="Trust '+t.trust+'/100 · liquidity depth + real activity">●</span>';
-      var washTag = t.wash ? '<span class="wash" title="Volume is very high vs liquidity — possible wash trading">⚠</span>' : '';
       var whaleTag = t.whale ? '<span class="whale" title="Large average trade size ('+fmtUsd(t.avgTrade)+'/trade) — whales active">🐋</span>' : '';
       return '<tr class="'+flash+'" data-url="'+esc(t.url)+'">'+
         '<td class="'+rankCls+'">'+(i+1)+'</td>'+
         '<td class="l"><div class="tok">'+icon+
-          '<div class="tok-txt"><div class="tok-sym">'+badge+esc(t.sym)+washTag+whaleTag+'</div>'+
+          '<div class="tok-txt"><div class="tok-sym">'+badge+esc(t.sym)+whaleTag+'</div>'+
           '<div class="tok-name">'+esc(t.name)+'</div></div></div></td>'+
         metricCell(current, t)+
         '<td class="col-mcap num">'+fmtUsd(t.mcap)+'</td>'+
