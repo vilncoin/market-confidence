@@ -151,6 +151,9 @@
   .trust-mid{color:#e2b93b}
   .trust-lo{color:#ff5470}
   .wash{color:#e2b93b;font-size:11px;margin-left:5px;cursor:help;vertical-align:middle}
+  .bmap{font-size:11px;margin-left:6px;text-decoration:none;opacity:.4;
+    vertical-align:middle;transition:opacity .15s;cursor:pointer}
+  .bmap:hover{opacity:1}
 
   .score{font-family:var(--mono);color:var(--toxic);font-weight:700}
   .num{font-family:var(--mono);color:var(--ink-dim)}
@@ -683,10 +686,13 @@
         : '<span class="tok-ic"></span>';
       var badge = '<span class="trust trust-'+t.trustTier+'" title="Trust '+t.trust+'/100 · liquidity depth + real activity">●</span>';
       var washTag = t.wash ? '<span class="wash" title="Volume is very high vs liquidity — possible wash trading">⚠</span>' : '';
+      var bubbleLink = t.tokenAddr
+        ? '<a class="bmap" href="https://app.bubblemaps.io/sol/token/'+esc(t.tokenAddr)+'" target="_blank" rel="noopener" title="View holder bubble map (Bubblemaps)">🫧</a>'
+        : '';
       return '<tr class="'+flash+'" data-url="'+esc(t.url)+'">'+
         '<td class="'+rankCls+'">'+(i+1)+'</td>'+
         '<td class="l"><div class="tok">'+icon+
-          '<div class="tok-txt"><div class="tok-sym">'+badge+esc(t.sym)+washTag+'</div>'+
+          '<div class="tok-txt"><div class="tok-sym">'+badge+esc(t.sym)+washTag+bubbleLink+'</div>'+
           '<div class="tok-name">'+esc(t.name)+'</div></div></div></td>'+
         metricCell(current, t)+
         '<td class="col-mcap num">'+fmtUsd(t.mcap)+'</td>'+
@@ -808,6 +814,8 @@
   });
 
   tbody.addEventListener("click", function(e){
+    // clicking the bubble-map link should open Bubblemaps, not DexScreener
+    if(e.target.closest("a.bmap")) return;
     var tr = e.target.closest("tr[data-url]");
     if(!tr) return;
     var url = tr.getAttribute("data-url");
