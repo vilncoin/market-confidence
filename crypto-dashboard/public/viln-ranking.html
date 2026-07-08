@@ -287,6 +287,9 @@
   var MIN_LIQ = 10000;    // $10K minimum pool liquidity
   var MIN_VOL = 5000;     // $5K minimum 24h volume
   var MIN_TX  = 30;       // at least 30 trades in 24h (alive)
+  // Dead-pool guard: if 24h volume is under this fraction of liquidity, the pool
+  // is parked money with almost no trading — drop it (e.g. BILLY: $6K vol / $840K liq).
+  var MIN_VOL_LIQ = 0.03; // volume must be ≥ 3% of liquidity
   // Wash-trading suspicion: volume/liquidity ratio above this looks inflated.
   var WASH_RATIO = 40;    // volume/liquidity above this is suspicious...
   var WASH_CHG = 8;       // ...but only if price barely moved (±8%). Real pumps get a pass.
@@ -472,7 +475,8 @@
       // Step 3 — trust floors: drop dust / dead / rug-prone tokens.
       return Object.keys(bySym).map(function(k){ return bySym[k]; })
         .filter(function(t){
-          return t.liq >= MIN_LIQ && t.vol >= MIN_VOL && t.tx >= MIN_TX;
+          return t.liq >= MIN_LIQ && t.vol >= MIN_VOL && t.tx >= MIN_TX
+              && (t.liq <= 0 || t.vol / t.liq >= MIN_VOL_LIQ);
         });
     });
   }
