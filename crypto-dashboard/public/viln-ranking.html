@@ -300,6 +300,9 @@
   // Whale activity: average trade size (24h volume ÷ trade count) at or above
   // this suggests large orders (whales) rather than retail. $2K per trade.
   var WHALE_AVG_TRADE = 2000;
+  // Whale also flagged when 24h volume alone is large — a big pool means whales
+  // are active even if the average ticket looks modest. $1M.
+  var WHALE_VOL = 1000000;
   // Wash-trading suspicion: volume/liquidity ratio above this looks inflated.
   var WASH_RATIO = 40;    // volume/liquidity above this is suspicious...
   var WASH_CHG = 8;       // ...but only if price barely moved (±8%). Real pumps get a pass.
@@ -586,7 +589,7 @@
       // ── Whale activity: average trade size = volume / trade count ──
       // Big average ticket = few large orders = whales moving. Small = retail.
       t.avgTrade = t.tx > 0 ? (t.vol / t.tx) : 0;
-      t.whale = t.avgTrade >= WHALE_AVG_TRADE;
+      t.whale = t.avgTrade >= WHALE_AVG_TRADE || t.vol >= WHALE_VOL;
     });
   }
   function ln(v){ return Math.log(1 + Math.max(0,v)); }
@@ -695,7 +698,7 @@
         : '<span class="tok-ic"></span>';
       var badge = '<span class="trust trust-'+t.trustTier+'" title="Trust '+t.trust+'/100 · liquidity depth + real activity">●</span>';
       var sizeTag = t.whale
-        ? '<span class="whale" title="Large average trade size ('+fmtUsd(t.avgTrade)+'/trade) — whales active">🐋</span>'
+        ? '<span class="whale" title="Whale activity — avg trade '+fmtUsd(t.avgTrade)+', 24h vol '+fmtUsd(t.vol)+'">🐋</span>'
         : '';
       return '<tr class="'+flash+'" data-url="'+esc(t.url)+'">'+
         '<td class="'+rankCls+'">'+(i+1)+'</td>'+
