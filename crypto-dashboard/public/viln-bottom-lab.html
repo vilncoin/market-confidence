@@ -564,7 +564,16 @@
       h._exitT  = h._entryT + (v.exitBars||0)*BAR;
     });
 
-    var arr=allHits.slice().sort(function(a,b){
+    var arr=allHits.slice();
+    // Multi-coin: drop stale signals from dead/illiquid coins whose 500-bar window
+    // reaches back weeks/months. Keep only the recent window so table matches the curve.
+    if(!deepMode && arr.length){
+      var newestT=Math.max.apply(null, arr.map(function(h){return h.t;}));
+      var freshCut=newestT - 3*86400000;
+      var fresh=arr.filter(function(h){return h.t>=freshCut;});
+      if(fresh.length>=2) arr=fresh;
+    }
+    arr.sort(function(a,b){
       if(key==="sym") return dir*(a.sym<b.sym?-1:a.sym>b.sym?1:0);
       var mk=mapKey(key), av=a[mk], bv=b[mk];
       if(av===null||av===undefined)av=-999; if(bv===null||bv===undefined)bv=-999;
