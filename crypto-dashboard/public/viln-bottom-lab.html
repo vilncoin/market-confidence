@@ -199,6 +199,19 @@
         <input type="range" id="p_fee" min="0" max="0.4" step="0.01" value="0.1">
         <div class="hint">entry+exit fees. Binance futures taker ≈ 0.10%, spot taker ≈ 0.20%</div>
       </div>
+
+      <div style="border-top:1px solid var(--line);margin:14px 0 12px"></div>
+      <h2 style="margin-bottom:12px">Portfolio (real bot sim)</h2>
+      <div class="param">
+        <label>Position size % of balance <b id="v_pos">20</b></label>
+        <input type="range" id="p_pos" min="5" max="100" step="5" value="20">
+        <div class="hint">how much of the account each trade uses</div>
+      </div>
+      <div class="param">
+        <label>Max concurrent positions <b id="v_maxpos">5</b></label>
+        <input type="range" id="p_maxpos" min="1" max="20" step="1" value="5">
+        <div class="hint">if this many are open, new signals are skipped (no capital)</div>
+      </div>
     </div>
   </div>
 
@@ -259,7 +272,8 @@
     rsiThr:33, dropPct:1.5, bounceAtr:0.5,
     useTrend:false, maxBelow:3.0,
     useWick:false, wickRatio:1.0,
-    winPct:1.5, winBars:12, stopPct:1.5, feePct:0.1
+    winPct:1.5, winBars:12, stopPct:1.5, feePct:0.1,
+    posPct:20, maxPos:5
   };
   var TF="5m", KLIMIT=500, BATCH=8, BATCH_PAUSE=250, QUOTE="USDT";
   // data-api.binance.vision = Binance public market-data mirror with CORS enabled
@@ -465,6 +479,8 @@
   bindSlider("p_winpct","v_winpct","winPct",function(x){return parseFloat(x).toFixed(1);});
   bindSlider("p_stoppct","v_stoppct","stopPct",function(x){return parseFloat(x).toFixed(1);});
   bindSlider("p_fee","v_fee","feePct",function(x){return parseFloat(x).toFixed(2);});
+  bindSlider("p_pos","v_pos","posPct");
+  bindSlider("p_maxpos","v_maxpos","maxPos");
   (function(){
     var el=$("p_winbars"), v=$("v_winbars");
     el.addEventListener("input",function(){
@@ -509,8 +525,9 @@
 
   // verdict: replay forward path bar-by-bar. Whichever of target(+winPct) / stop(-stopPct)
   // is touched first wins. If neither by window end, judge by the close at window end.
+  // exitBars = how many bars after entry the trade closes (for portfolio capital timing).
   function verdict(h){
-    if(!h.fpath) return {peak:null,res:null};
+    if(!h.fpath) return {peak:null,res:null,exitBars:0};
     var end=Math.min(CFG.winBars, h.fpath.length);
     var peak=null, tgt=CFG.winPct, stp=-CFG.stopPct;
     for(var i=0;i<end;i++){
@@ -518,14 +535,14 @@
       if(!b) break;
       if(peak===null||b.hi>peak) peak=b.hi;
       var hitT=b.hi>=tgt, hitS=b.lo<=stp;
-      if(hitT) return {peak:peak,res:"win"};   // if both in one bar, assume target hit first
-      if(hitS) return {peak:peak,res:"loss"};
+      if(hitT) return {peak:peak,res:"win",exitBars:i+1};   // if both in one bar, assume target first
+      if(hitS) return {peak:peak,res:"loss",exitBars:i+1};
     }
     // neither touched → use close at window end
-    var last=null;
-    for(var j=end-1;j>=0;j--){ if(h.fpath[j]){last=h.fpath[j];break;} }
-    if(last===null) return {peak:peak,res:null,closeRet:null};
-    return {peak:peak, res: last.cl>=0?"flat+":"flat-", closeRet:last.cl};
+    var last=null, lastIdx=0;
+    for(var j=end-1;j>=0;j--){ if(h.fpath[j]){last=h.fpath[j];lastIdx=j+1;break;} }
+    if(last===null) return {peak:peak,res:null,closeRet:null,exitBars:end};
+    return {peak:peak, res: last.cl>=0?"flat+":"flat-", closeRet:last.cl, exitBars:lastIdx};
   }
 
   function render(){
@@ -534,8 +551,11 @@
     allHits.forEach(function(h){
       var v=verdict(h);
       h._peak=v.peak; h._res=v.res; h._closeRet=v.closeRet;
-      // numeric win flag for stats: win / flat+ = 1 ; loss / flat- = 0 ; null = null
       h._win = v.res===null?null : (v.res==="win"||v.res==="flat+")?1:0;
+      // entry ~ rightBars after the pivot low (signal confirmation); exit = entry + exitBars, in 5m bars
+      var BAR=300000; // 5m in ms
+      h._entryT = h.t + CFG.rightBars*BAR;
+      h._exitT  = h._entryT + (v.exitBars||0)*BAR;
     });
 
     var arr=allHits.slice().sort(function(a,b){
@@ -619,49 +639,76 @@
     renderEquity(judged);
   }
 
-  // ── equity curve: compound $100 through trades in time order, at 50% and 30% sizing ──
+  // ── portfolio sim: one real $100 account, capital-aware, concurrent positions ──
   function renderEquity(judged){
     var wrap=$("equityWrap");
     if(!judged || judged.length<2){ wrap.style.display="none"; return; }
     wrap.style.display="block";
 
-    // chronological order
-    var seq=judged.slice().sort(function(a,b){return a.t-b.t;});
+    // signals in entry-time order, each with entry/exit time and net%
+    var seq=judged.slice().filter(function(h){return h._entryT&&h._exitT;})
+                  .sort(function(a,b){return a._entryT-b._entryT;});
+    if(seq.length<2){ wrap.style.display="none"; return; }
 
-    function simulate(frac){
-      var bal=100, curve=[100], peak=100, maxDD=0;
-      for(var i=0;i<seq.length;i++){
-        var r=seq[i]._net/100;           // net return of trade as fraction
-        bal = bal * (1 + frac*r);        // only `frac` of balance is exposed
-        if(bal>peak) peak=bal;
-        var dd=(peak-bal)/peak;
-        if(dd>maxDD) maxDD=dd;
-        curve.push(bal);
+    // Event-driven: walk time. At each signal entry, if a position slot is free,
+    // open a trade using posPct of *current* balance; realize P&L at its exit time.
+    // Balance updates as trades close, so capital is shared realistically.
+    function runPortfolio(posFrac, maxPos){
+      var bal=100, curve=[{t:seq[0]._entryT, v:100}], peak=100, maxDD=0;
+      var open=[]; // {exitT, stake, net}
+      var taken=0, skipped=0;
+
+      function closeDue(nowT){
+        for(var k=open.length-1;k>=0;k--){
+          if(open[k].exitT<=nowT){
+            bal += open[k].stake * (open[k].net/100); // realize P&L on the staked amount
+            if(bal>peak) peak=bal;
+            var dd=(peak-bal)/peak; if(dd>maxDD) maxDD=dd;
+            curve.push({t:open[k].exitT, v:bal});
+            open.splice(k,1);
+          }
+        }
       }
-      return {curve:curve, end:bal, maxDD:maxDD*100};
+
+      for(var i=0;i<seq.length;i++){
+        var h=seq[i];
+        closeDue(h._entryT);              // free capital from trades that closed before now
+        if(open.length>=maxPos){ skipped++; continue; }
+        var stake=bal*posFrac;            // capital committed to this trade
+        open.push({exitT:h._exitT, stake:stake, net:h._net});
+        taken++;
+      }
+      // close any still-open at the end
+      open.sort(function(a,b){return a.exitT-b.exitT;});
+      open.forEach(function(o){
+        bal += o.stake*(o.net/100);
+        if(bal>peak) peak=bal;
+        var dd=(peak-bal)/peak; if(dd>maxDD) maxDD=dd;
+        curve.push({t:o.exitT, v:bal});
+      });
+      curve.sort(function(a,b){return a.t-b.t;});
+      return {curve:curve.map(function(p){return p.v;}), end:bal, maxDD:maxDD*100, taken:taken, skipped:skipped};
     }
 
-    var s50=simulate(0.5), s30=simulate(0.3);
+    var pf=runPortfolio(CFG.posPct/100, CFG.maxPos);
+    // comparison line at half position size, same maxPos
+    var pfSafe=runPortfolio((CFG.posPct/2)/100, CFG.maxPos);
 
-    // stats line
-    var spanTxt, modeNote;
-    if(deepMode){
-      var days=(deepSpanMs/86400000).toFixed(1);
-      spanTxt = seq.length+" trades · "+days+" days (one continuous coin)";
-      modeNote = "";
-    } else {
-      spanTxt = seq.length+" trades across many coins";
-      modeNote = '<div style="color:var(--amber);font-size:11px;margin-top:2px">⚠ multi-coin blend — signals from different coins strung together, not one real account. Use "deep backtest" (left) for a true single-coin equity curve.</div>';
-    }
+    var spanMs = seq[seq.length-1]._exitT - seq[0]._entryT;
+    var days=(spanMs/86400000).toFixed(1);
+    var modeNote = deepMode
+      ? '<div style="color:var(--ink-faint);font-size:11px;margin-top:2px">one continuous coin — a real single-account run.</div>'
+      : '<div style="color:var(--amber);font-size:11px;margin-top:2px">⚠ multi-coin: treats all scanned coins as one shared account traded together (this is the realistic "watch many, trade the ones that fire" bot). Timestamps blended across coins.</div>';
+
     $("equityStats").innerHTML=
-      '<div><span style="color:var(--hunt-hi)">■</span> 50% sizing → <b style="color:'+(s50.end>=100?"var(--signal)":"var(--down)")+'">$'+s50.end.toFixed(2)+'</b> <span style="color:var(--ink-faint)">(maxDD −'+s50.maxDD.toFixed(1)+'%)</span></div>'+
-      '<div><span style="color:var(--amber)">■</span> 30% sizing → <b style="color:'+(s30.end>=100?"var(--signal)":"var(--down)")+'">$'+s30.end.toFixed(2)+'</b> <span style="color:var(--ink-faint)">(maxDD −'+s30.maxDD.toFixed(1)+'%)</span></div>'+
-      '<div style="color:var(--ink-faint)">'+spanTxt+'</div>'+modeNote;
+      '<div><span style="color:var(--hunt-hi)">■</span> '+CFG.posPct+'% size → <b style="color:'+(pf.end>=100?"var(--signal)":"var(--down)")+'">$'+pf.end.toFixed(2)+'</b> <span style="color:var(--ink-faint)">(maxDD −'+pf.maxDD.toFixed(1)+'%)</span></div>'+
+      '<div><span style="color:var(--amber)">■</span> '+(CFG.posPct/2)+'% size → <b style="color:'+(pfSafe.end>=100?"var(--signal)":"var(--down)")+'">$'+pfSafe.end.toFixed(2)+'</b> <span style="color:var(--ink-faint)">(maxDD −'+pfSafe.maxDD.toFixed(1)+'%)</span></div>'+
+      '<div style="color:var(--ink-faint)">'+pf.taken+' taken · '+pf.skipped+' skipped (no slot) · max '+CFG.maxPos+' open · '+days+' days</div>'+
+      modeNote;
 
-    // draw SVG
     $("equityChart").innerHTML=svgCurve([
-      {curve:s50.curve, color:"var(--hunt-hi)"},
-      {curve:s30.curve, color:"var(--amber)"}
+      {curve:pf.curve, color:"var(--hunt-hi)"},
+      {curve:pfSafe.curve, color:"var(--amber)"}
     ]);
   }
 
