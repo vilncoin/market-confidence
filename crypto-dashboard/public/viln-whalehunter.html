@@ -40,6 +40,11 @@
   .sub{font-size:12px;color:var(--ink-dim);margin:2px 0 0;letter-spacing:.02em}
   .scan-state{display:flex;align-items:center;gap:10px;font-family:var(--mono);
     font-size:12px;color:var(--ink-dim)}
+  .sound-btn{background:none;border:1px solid var(--line-hi);border-radius:6px;
+    color:var(--ink-dim);font-size:13px;line-height:1;padding:4px 7px;cursor:pointer;
+    transition:.15s}
+  .sound-btn:hover{color:var(--hunt);border-color:var(--hunt)}
+  .sound-btn.off{opacity:.45}
   .radar{width:9px;height:9px;border-radius:50%;background:var(--hunt);
     box-shadow:0 0 0 0 rgba(77,139,255,.6);animation:ping 1.8s ease-out infinite}
   @keyframes ping{0%{box-shadow:0 0 0 0 rgba(77,139,255,.5)}
@@ -71,8 +76,8 @@
   .feed{display:flex;flex-direction:column;gap:10px}
   .card{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--signal);
     border-radius:12px;padding:14px 16px;display:flex;gap:14px;align-items:center;
-    cursor:pointer;transition:border-color .15s,transform .15s;
-    animation:slidein .4s ease}
+    cursor:pointer;transition:border-color .15s,transform .15s}
+  .card.fresh{animation:slidein .4s ease}
   @keyframes slidein{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
   .card:hover{border-color:var(--line-hi);transform:translateX(2px)}
   .card .tri{font-size:20px;color:var(--signal);flex:none}
@@ -121,7 +126,7 @@
         <p class="sub">Bottom-signal scanner · live market</p>
       </div>
     </div>
-    <div class="scan-state"><span class="radar"></span><span id="scanTxt">radar active</span></div>
+    <div class="scan-state"><button id="soundBtn" class="sound-btn" title="Toggle alert sound">🔔</button><span class="radar"></span><span id="scanTxt">radar active</span></div>
   </div>
 
   <div class="divider"></div>
@@ -262,6 +267,8 @@
 
   // ── State ──
   var symbols=[], feed=[], seen={}, booted=false, running=false;
+  var soundOn=true;
+  var sigId=0;
   var feedEl=document.getElementById("feed");
   var scanTxt=document.getElementById("scanTxt");
   var foundTxt=document.getElementById("foundTxt");
@@ -289,20 +296,17 @@
         'No signals yet this session. Scanning continues — a card appears the moment a setup completes.</div>';
       return;
     }
-    feedEl.innerHTML = feed.map(function(e){
+    feedEl.innerHTML = feed.map(function(e, idx){
       var base=e.sym.slice(0,-QUOTE.length);
-      return '<div class="card" data-sym="'+esc(e.sym)+'">'+
+      var freshCls = e._fresh ? " fresh" : "";
+      e._fresh = false;   // animate once, then never again
+      return '<div class="card'+freshCls+'" data-sym="'+esc(e.sym)+'" data-id="'+e.id+'">'+
         '<span class="tri">▲</span>'+
         '<div class="sym-wrap">'+
           '<div class="sym">'+esc(base)+'<small>/'+QUOTE+'</small></div>'+
-          '<div class="metrics">'+
-            '<span class="metric">RSI <b>'+e.rsi+'</b></span>'+
-            '<span class="metric">Drop <b>'+e.drop+'%</b></span>'+
-            '<span class="metric">Bounce <b>'+e.bounce+'×ATR</b></span>'+
-          '</div>'+
         '</div>'+
         '<div class="right"><div class="price">'+fmtPrice(e.price)+'</div>'+
-          '<div class="ago">'+fmtAgo(e.at)+'</div></div>'+
+          '<div class="ago" data-at="'+e.at+'">'+fmtAgo(e.at)+'</div></div>'+
       '</div>';
     }).join("");
   }
@@ -314,11 +318,31 @@
     seen[key]=true;
     if(booted){
       feed.unshift({ sym:sym, rsi:sig.rsi, drop:sig.drop, bounce:sig.bounce,
-        price:sig.price, at:Date.now() });
+        price:sig.price, at:Date.now(), id:(++sigId), _fresh:true });
       if(feed.length>80) feed.length=80;
+      playAlert();
       return true;
     }
     return false;
+  }
+
+  // Short sonar-style beep via Web Audio (no external file). Gracefully no-ops
+  // if the browser blocks audio until the user interacts with the page.
+  var audioCtx=null;
+  function playAlert(){
+    if(!soundOn) return;
+    try{
+      if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+      var t=audioCtx.currentTime;
+      var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type="sine"; o.frequency.setValueAtTime(880,t);
+      o.frequency.exponentialRampToValueAtTime(440,t+0.18);
+      g.gain.setValueAtTime(0.0001,t);
+      g.gain.exponentialRampToValueAtTime(0.25,t+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+0.35);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t); o.stop(t+0.36);
+    }catch(e){}
   }
 
   function sleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
@@ -364,6 +388,18 @@
   }
 
   // click card → open on Binance
+  // sound toggle (also unlocks audio on first user gesture)
+  var soundBtn=document.getElementById("soundBtn");
+  soundBtn.addEventListener("click", function(){
+    soundOn=!soundOn;
+    soundBtn.textContent = soundOn ? "🔔" : "🔕";
+    soundBtn.classList.toggle("off", !soundOn);
+    if(soundOn){
+      try{ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+        if(audioCtx.state==="suspended") audioCtx.resume(); playAlert(); }catch(e){}
+    }
+  });
+
   feedEl.addEventListener("click", function(e){
     var c=e.target.closest(".card[data-sym]");
     if(!c) return;
@@ -371,7 +407,13 @@
   });
 
   // refresh "ago" labels every 20s
-  setInterval(function(){ if(feed.length) renderFeed(); }, 20000);
+  // refresh only the "ago" labels — no full re-render, so cards don't flicker
+  setInterval(function(){
+    var nodes=feedEl.querySelectorAll(".ago[data-at]");
+    for(var i=0;i<nodes.length;i++){
+      nodes[i].textContent=fmtAgo(parseInt(nodes[i].getAttribute("data-at"),10));
+    }
+  }, 20000);
 
   // boot
   getSymbols().then(function(syms){
