@@ -140,19 +140,24 @@
     <div class="card">
       <h2>Parameters</h2>
       <div class="param">
-        <label>① RSI threshold <b id="v_rsi">30</b></label>
-        <input type="range" id="p_rsi" min="10" max="45" step="1" value="30">
+        <label>① RSI threshold <b id="v_rsi">33</b></label>
+        <input type="range" id="p_rsi" min="10" max="45" step="1" value="33">
         <div class="hint">bar's RSI must be below this (over-sold)</div>
       </div>
       <div class="param">
-        <label>② Min drop % <b id="v_drop">3.0</b></label>
-        <input type="range" id="p_drop" min="1" max="15" step="0.5" value="3">
+        <label>② Min drop % <b id="v_drop">1.5</b></label>
+        <input type="range" id="p_drop" min="1" max="15" step="0.5" value="1.5">
         <div class="hint">fall from recent high into the low</div>
       </div>
       <div class="param">
-        <label>③ Bounce strength (ATR) <b id="v_bounce">1.5</b></label>
-        <input type="range" id="p_bounce" min="0" max="6" step="0.1" value="1.5">
+        <label>③ Bounce strength (ATR) <b id="v_bounce">0.5</b></label>
+        <input type="range" id="p_bounce" min="0" max="6" step="0.1" value="0.5">
         <div class="hint">rebound above the low, in ATR units (fixed timing)</div>
+      </div>
+      <div class="param">
+        <label>⑥ Pivot confirm bars <b id="v_right">3</b></label>
+        <input type="range" id="p_right" min="2" max="8" step="1" value="3">
+        <div class="hint">bars each side to confirm a low — lower = more signals, faster, but noisier (also = alert delay in bars)</div>
       </div>
       <label class="toggle-row"><input type="checkbox" id="p_useTrend"> ④ EMA-gap filter (suppress far-below-EMA)</label>
       <div class="param" id="trendBox" style="display:none">
@@ -206,8 +211,8 @@
 
   // ── config ──
   var CFG = {
-    rsiLen:14, leftBars:5, rightBars:5, lowWin:150, dropWin:24, emaLen:50,
-    rsiThr:30, dropPct:3.0, bounceAtr:1.5,
+    rsiLen:14, leftBars:5, rightBars:3, lowWin:150, dropWin:24, emaLen:50,
+    rsiThr:33, dropPct:1.5, bounceAtr:0.5,
     useTrend:false, maxBelow:3.0,
     useWick:false, wickRatio:1.0
   };
@@ -379,6 +384,7 @@
   bindSlider("p_rsi","v_rsi","rsiThr");
   bindSlider("p_drop","v_drop","dropPct",function(x){return parseFloat(x).toFixed(1);});
   bindSlider("p_bounce","v_bounce","bounceAtr",function(x){return parseFloat(x).toFixed(1);});
+  bindSlider("p_right","v_right","rightBars");
   bindSlider("p_below","v_below","maxBelow",function(x){return parseFloat(x).toFixed(1);});
   bindSlider("p_wick","v_wick","wickRatio",function(x){return parseFloat(x).toFixed(1);});
   $("p_useTrend").addEventListener("change",function(){
