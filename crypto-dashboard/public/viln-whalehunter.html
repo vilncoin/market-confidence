@@ -114,7 +114,7 @@
       <span class="mark">🐋</span>
       <div>
         <h1>WHALE<span>HUNTER</span></h1>
-        <p class="sub">Bottom-signal scanner · Binance · 5m</p>
+        <p class="sub">Bottom-signal scanner · live market</p>
       </div>
     </div>
     <div class="scan-state"><span class="radar"></span><span id="scanTxt">starting scan…</span></div>
@@ -124,7 +124,7 @@
 
   <div class="thesis">
     <span class="big">WHAT THIS IS</span>
-    <p>WhaleHunter scans <b>every Binance pair</b> on the 5-minute chart for one setup: a coin that just <b>oversold, dropped hard, and started bouncing off a real bottom</b>. When all conditions line up, it shows up below — newest first. This is information, not advice: it tells you a bottom pattern formed, it doesn't tell you to buy.</p>
+    <p>WhaleHunter scans <b>the entire market</b> for one setup: a coin that just <b>oversold, dropped hard, and started bouncing off a real bottom</b>. When all conditions line up, it shows up below — newest first. This is information, not advice: it tells you a bottom pattern formed, it doesn't tell you to buy.</p>
   </div>
 
   <div class="progress">
@@ -143,7 +143,7 @@
 
   <div class="foot">
     <span id="statusLine">—</span>
-    <span>Data: <a href="https://binance.com" target="_blank" rel="noopener">Binance</a> · 5m klines</span>
+    <span>Real-time market scan</span>
   </div>
   <p class="note">Signals are pattern detections on price data, not financial advice. Crypto is highly risky; do your own research. Scanning runs while this page is open.</p>
 
@@ -160,9 +160,9 @@
   };
   var TF = "5m";
   var KLIMIT = 200;               // candles per symbol (enough for lowWin=150)
-  var BATCH = 6;                  // symbols fetched in parallel
-  var BATCH_PAUSE = 400;          // ms between batches (rate-limit safety)
-  var CYCLE_PAUSE = 8000;         // ms between full market sweeps
+  var BATCH = 10;                 // symbols fetched in parallel
+  var BATCH_PAUSE = 250;          // ms between batches (rate-limit safety)
+  var CYCLE_PAUSE = 6000;         // ms between full market sweeps
   var QUOTE = "USDT";             // only scan USDT pairs
 
   // ── Indicators (ported from Pine, verified) ──
@@ -381,7 +381,7 @@
     statusLine.textContent="Loaded "+symbols.length+" USDT pairs";
     run();
   }).catch(function(){
-    feedEl.innerHTML='<div class="state"><div class="big">Couldn\'t reach Binance</div>'+
+    feedEl.innerHTML='<div class="state"><div class="big">Market feed unavailable</div>'+
       'The market data feed didn\'t respond. This can be a network block or rate limit — '+
       'reload in a moment.</div>';
     scanTxt.textContent="offline";
