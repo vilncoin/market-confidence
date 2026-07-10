@@ -502,6 +502,11 @@
       // stricter tabs re-filter in sortFor. Dead-pool guard always applies.
       return Object.keys(bySym).map(function(k){ return bySym[k]; })
         .filter(function(t){
+          // broken-data guard: huge mcap with near-zero volume is bad data
+          // (e.g. CLKN: $2.3B mcap, $13K volume). Drop it everywhere.
+          if(t.mcap > 1e8 && t.vol > 0 && (t.vol / t.mcap) < 0.0005) return false;
+          // absurd 24h change almost always means broken data
+          if(t.chg > 100000) return false;
           return t.liq >= GEM_MIN_LIQ && t.vol >= GEM_MIN_VOL && t.tx >= GEM_MIN_TX
               && (t.liq <= 0 || t.vol / t.liq >= MIN_VOL_LIQ);
         });
