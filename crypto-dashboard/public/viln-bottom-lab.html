@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bottom Lab · VILN</title>
+<style>
+  :root{
+    --bg:#05070c;
+    --panel:#0a0e16;
+    --panel-2:#0f1420;
+    --line:rgba(90,140,255,.14);
+    --line-hi:rgba(90,140,255,.30);
+    --hunt:#4d8bff;
+    --hunt-hi:#7db0ff;
+    --signal:#3ddc84;
+    --ink:#e8eefc;
+    --ink-dim:rgba(232,238,252,.5);
+    --ink-faint:rgba(232,238,252,.3);
+    --up:#3ddc84;
+    --down:#ff5470;
+    --amber:#ffb454;
+    --mono:"SFMono-Regular",ui-monospace,"Roboto Mono",Menlo,Consolas,monospace;
+    --sans:"Arial Black",system-ui,sans-serif;
+    --body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--body);
+    -webkit-font-smoothing:antialiased;min-height:100vh}
+  .wrap{max-width:1080px;margin:0 auto;padding:clamp(14px,3vw,26px)}
+
+  .head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+    flex-wrap:wrap;margin-bottom:14px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand .mark{font-size:26px;line-height:1;filter:drop-shadow(0 0 12px rgba(77,139,255,.5))}
+  .brand h1{margin:0;font-family:var(--sans);font-size:clamp(19px,3.4vw,26px);letter-spacing:.04em}
+  .brand h1 span{color:var(--hunt)}
+  .sub{font-size:12px;color:var(--ink-dim);margin:2px 0 0;letter-spacing:.02em}
+
+  .intro{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;margin-bottom:16px;font-size:13px;line-height:1.55;color:var(--ink-dim)}
+  .intro b{color:var(--ink)}
+
+  /* controls */
+  .controls{display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:18px}
+  @media(min-width:720px){.controls{grid-template-columns:320px 1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card h2{margin:0 0 12px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink-dim);font-family:var(--mono)}
+
+  .scan-row{display:flex;gap:8px;margin-bottom:10px}
+  .scan-row input{flex:1;background:var(--panel-2);border:1px solid var(--line-hi);
+    border-radius:8px;color:var(--ink);font-family:var(--mono);font-size:13px;padding:9px 11px}
+  .scan-row input:focus{outline:none;border-color:var(--hunt)}
+  .btn{background:var(--hunt);color:#04070d;border:none;border-radius:8px;font-weight:700;
+    font-size:13px;padding:9px 16px;cursor:pointer;white-space:nowrap;transition:.15s}
+  .btn:hover{background:var(--hunt-hi)}
+  .btn:disabled{opacity:.4;cursor:default}
+  .btn.ghost{background:none;border:1px solid var(--line-hi);color:var(--ink-dim)}
+  .btn.ghost:hover{border-color:var(--hunt);color:var(--hunt)}
+  .presets{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+  .chip{background:var(--panel-2);border:1px solid var(--line);border-radius:20px;
+    color:var(--ink-dim);font-family:var(--mono);font-size:11px;padding:4px 10px;cursor:pointer;transition:.15s}
+  .chip:hover{border-color:var(--hunt);color:var(--hunt)}
+
+  .param{margin-bottom:14px}
+  .param:last-child{margin-bottom:0}
+  .param label{display:flex;justify-content:space-between;font-family:var(--mono);
+    font-size:12px;color:var(--ink-dim);margin-bottom:6px}
+  .param label b{color:var(--hunt-hi)}
+  .param input[type=range]{width:100%;accent-color:var(--hunt);height:4px}
+  .param .hint{font-size:11px;color:var(--ink-faint);margin-top:3px}
+  .toggle-row{display:flex;align-items:center;gap:8px;font-family:var(--mono);
+    font-size:12px;color:var(--ink-dim);margin-bottom:14px;cursor:pointer}
+  .toggle-row input{accent-color:var(--hunt);width:15px;height:15px}
+
+  /* results */
+  .summary{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-family:var(--mono);
+    font-size:12px;color:var(--ink-dim)}
+  .summary b{color:var(--ink);font-size:15px}
+  .status{font-family:var(--mono);font-size:12px;color:var(--ink-dim);min-height:16px}
+
+  .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  th,td{padding:8px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+  th{color:var(--ink-faint);font-weight:400;text-transform:uppercase;letter-spacing:.05em;
+    font-size:10px;position:sticky;top:0;background:var(--panel-2);cursor:pointer;user-select:none}
+  th:hover{color:var(--hunt)}
+  th.lft,td.lft{text-align:left}
+  tbody tr:hover{background:rgba(90,140,255,.05)}
+  td.sym{color:var(--ink);font-weight:700}
+  td.pos{color:var(--signal)}
+  .val-r{color:var(--amber)}
+  .badge{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;
+    background:rgba(61,220,132,.14);color:var(--signal)}
+  .empty{padding:40px;text-align:center;color:var(--ink-faint);font-family:var(--mono);font-size:13px}
+
+  .stats-note{margin-top:12px;padding:12px 14px;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:10px;font-size:12px;line-height:1.6;color:var(--ink-dim)}
+  .stats-note b{color:var(--ink)}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:8px;font-family:var(--mono);
+    font-size:11px;color:var(--ink-faint)}
+  .legend span b{color:var(--hunt-hi)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div class="brand">
+      <span class="mark">🔬</span>
+      <div>
+        <h1>BOTTOM <span>LAB</span></h1>
+        <p class="sub">tune the signal · read every hit's numbers · no screenshots</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="intro">
+    Scan any coin's recent 5-minute history and list <b>every bar</b> where the bottom signal fires,
+    with all six diagnostic values — <b>R</b>si, <b>D</b>rop%, <b>B</b>ounce(ATR), <b>E</b>ma-gap%,
+    <b>W</b>ick ratio, <b>C</b>lose-position. Adjust the sliders and the table re-computes instantly on the
+    cached candles. This is the same math as WhaleHunter, with the bounce timing fixed.
+  </div>
+
+  <div class="controls">
+    <div class="card">
+      <h2>Scan</h2>
+      <div class="scan-row">
+        <input id="symInput" placeholder="ESPORTS, KAT, RIF …" spellcheck="false">
+        <button class="btn" id="scanBtn">Scan</button>
+      </div>
+      <div class="presets" id="presets"></div>
+      <div style="margin-top:12px">
+        <button class="btn ghost" id="topBtn" style="width:100%">Scan top 40 by volume</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Parameters</h2>
+      <div class="param">
+        <label>① RSI threshold <b id="v_rsi">30</b></label>
+        <input type="range" id="p_rsi" min="10" max="45" step="1" value="30">
+        <div class="hint">bar's RSI must be below this (over-sold)</div>
+      </div>
+      <div class="param">
+        <label>② Min drop % <b id="v_drop">3.0</b></label>
+        <input type="range" id="p_drop" min="1" max="15" step="0.5" value="3">
+        <div class="hint">fall from recent high into the low</div>
+      </div>
+      <div class="param">
+        <label>③ Bounce strength (ATR) <b id="v_bounce">1.5</b></label>
+        <input type="range" id="p_bounce" min="0" max="6" step="0.1" value="1.5">
+        <div class="hint">rebound above the low, in ATR units (fixed timing)</div>
+      </div>
+      <label class="toggle-row"><input type="checkbox" id="p_useTrend"> ④ EMA-gap filter (suppress far-below-EMA)</label>
+      <div class="param" id="trendBox" style="display:none">
+        <label>&nbsp;&nbsp;&nbsp;max % below EMA50 <b id="v_below">3.0</b></label>
+        <input type="range" id="p_below" min="1" max="15" step="0.5" value="3">
+      </div>
+      <label class="toggle-row"><input type="checkbox" id="p_useWick"> ⑤ Wick filter (require lower wick)</label>
+      <div class="param" id="wickBox" style="display:none">
+        <label>&nbsp;&nbsp;&nbsp;min wick / body <b id="v_wick">1.0</b></label>
+        <input type="range" id="p_wick" min="0" max="5" step="0.1" value="1">
+      </div>
+    </div>
+  </div>
+
+  <div class="summary" id="summary"></div>
+  <div class="status" id="status">Enter a symbol (Binance USDT pair, base only) and scan.</div>
+
+  <div class="tbl-wrap" style="margin-top:10px">
+    <table>
+      <thead>
+        <tr>
+          <th class="lft" data-k="sym">Coin</th>
+          <th data-k="when">When</th>
+          <th data-k="price">Low px</th>
+          <th data-k="rsi">R</th>
+          <th data-k="drop">D%</th>
+          <th data-k="bounce">B·atr</th>
+          <th data-k="ema">E%</th>
+          <th data-k="wick">W</th>
+          <th data-k="close">C</th>
+          <th data-k="fwd">+1h%</th>
+        </tr>
+      </thead>
+      <tbody id="rows"><tr><td class="empty" colspan="10">No scan yet.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="legend">
+    <span><b>R</b> rsi</span><span><b>D</b> drop from recent high</span>
+    <span><b>B</b> bounce in ATR</span><span><b>E</b> % below EMA50</span>
+    <span><b>W</b> lower-wick ÷ body</span><span><b>C</b> close position in bar (0=low,1=high)</span>
+    <span><b>+1h</b> price change 12 bars later (was it a real bottom?)</span>
+  </div>
+
+  <div class="stats-note" id="statsNote" style="display:none"></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ── config ──
+  var CFG = {
+    rsiLen:14, leftBars:5, rightBars:5, lowWin:150, dropWin:24, emaLen:50,
+    rsiThr:30, dropPct:3.0, bounceAtr:1.5,
+    useTrend:false, maxBelow:3.0,
+    useWick:false, wickRatio:1.0
+  };
+  var TF="5m", KLIMIT=500, BATCH=8, BATCH_PAUSE=250, QUOTE="USDT";
+  var API="https://api.binance.com";
+  var PRESETS=["ESPORTS","KAT","RIF","TWT","BTC","ETH","SOL","DOGE"];
+
+  // ── indicators (from WhaleHunter, verified) ──
+  function rsiSeries(closes,len){
+    var out=new Array(closes.length).fill(null);
+    if(closes.length<len+1) return out;
+    var gain=0,loss=0;
+    for(var i=1;i<=len;i++){var d=closes[i]-closes[i-1];if(d>=0)gain+=d;else loss-=d;}
+    var avgG=gain/len,avgL=loss/len;
+    out[len]=avgL===0?100:100-100/(1+avgG/avgL);
+    for(var i=len+1;i<closes.length;i++){
+      var d=closes[i]-closes[i-1],g=d>0?d:0,l=d<0?-d:0;
+      avgG=(avgG*(len-1)+g)/len;avgL=(avgL*(len-1)+l)/len;
+      out[i]=avgL===0?100:100-100/(1+avgG/avgL);
+    }
+    return out;
+  }
+  function atrSeries(highs,lows,closes,len){
+    var n=closes.length,tr=new Array(n).fill(null);
+    tr[0]=highs[0]-lows[0];
+    for(var i=1;i<n;i++)tr[i]=Math.max(highs[i]-lows[i],Math.abs(highs[i]-closes[i-1]),Math.abs(lows[i]-closes[i-1]));
+    var out=new Array(n).fill(null);
+    if(n<len)return out;
+    var sum=0;for(var i=0;i<len;i++)sum+=tr[i];
+    out[len-1]=sum/len;
+    for(var i=len;i<n;i++)out[i]=(out[i-1]*(len-1)+tr[i])/len;
+    return out;
+  }
+  function emaSeries(closes,len){
+    var out=new Array(closes.length).fill(null);
+    if(closes.length<len)return out;
+    var k=2/(len+1),sum=0;
+    for(var i=0;i<len;i++)sum+=closes[i];
+    out[len-1]=sum/len;
+    for(var i=len;i<closes.length;i++)out[i]=closes[i]*k+out[i-1]*(1-k);
+    return out;
+  }
+  function isPivotLow(lows,idx,left,right){
+    if(idx-left<0||idx+right>=lows.length)return false;
+    var v=lows[idx];
+    for(var j=idx-left;j<=idx+right;j++){if(j===idx)continue;if(lows[j]<v)return false;}
+    return true;
+  }
+  function highestIn(arr,endIdx,win){var s=Math.max(0,endIdx-win+1),m=-Infinity;
+    for(var i=s;i<=endIdx;i++)if(arr[i]>m)m=arr[i];return m;}
+  function lowestIn(arr,endIdx,win){var s=Math.max(0,endIdx-win+1),m=Infinity;
+    for(var i=s;i<=endIdx;i++)if(arr[i]<m)m=arr[i];return m;}
+
+  // ── evaluate EVERY pivot in history, return list of hits with all 6 values ──
+  function scanHistory(sym,candles){
+    var n=candles.length, hits=[];
+    var need=Math.max(CFG.lowWin,CFG.dropWin,CFG.rsiLen+1,CFG.emaLen)+CFG.rightBars+5;
+    if(n<need)return hits;
+    var highs=candles.map(function(x){return x.h;});
+    var lows =candles.map(function(x){return x.l;});
+    var closes=candles.map(function(x){return x.c;});
+    var opens =candles.map(function(x){return x.o;});
+    var times =candles.map(function(x){return x.t;});
+    var rsi=rsiSeries(closes,CFG.rsiLen);
+    var atr=atrSeries(highs,lows,closes,14);
+    var ema=emaSeries(closes,CFG.emaLen);
+
+    // walk pivots: pivot bar p is confirmed rightBars later
+    for(var p=CFG.leftBars; p<n-CFG.rightBars; p++){
+      if(!isPivotLow(lows,p,CFG.leftBars,CFG.rightBars)) continue;
+      var pLow=lows[p], pRsi=rsi[p];
+      if(pRsi===null) continue;
+      if(pLow!==lowestIn(lows,p,CFG.lowWin)) continue;
+      var recentHigh=highestIn(highs,p,CFG.dropWin);
+      var dropVal=(recentHigh-pLow)/recentHigh*100;
+
+      // FIXED bounce: max high over the rightBars bars AFTER the pivot low
+      var bEnd=Math.min(n-1,p+CFG.rightBars);
+      var bounceHigh=highestIn(highs,bEnd,CFG.rightBars);
+      var atrP=atr[p];
+      if(!atrP) continue;
+      var bounceVal=(bounceHigh-pLow)/atrP;
+
+      // EMA gap
+      var emaP=ema[p];
+      var belowPct=emaP? (emaP-pLow)/emaP*100 : 0;
+      // candle shape
+      var rng=highs[p]-pLow;
+      var lowerWick=Math.min(closes[p],opens[p])-pLow;
+      var body=Math.abs(closes[p]-opens[p]);
+      var wickR=body>0? lowerWick/body : (lowerWick>0?9:0);
+      var closePos=rng>0? (closes[p]-pLow)/rng : 0;
+
+      // apply active filters
+      if(!(pRsi<CFG.rsiThr && dropVal>=CFG.dropPct && bounceVal>=CFG.bounceAtr)) continue;
+      if(CFG.useTrend && !(belowPct<=CFG.maxBelow || dropVal>=CFG.dropPct*3)) continue;
+      if(CFG.useWick && !(wickR>=CFG.wickRatio && closePos>=0.4)) continue;
+
+      // forward return: price 12 bars (1h) after pivot vs pivot low
+      var fwdIdx=p+12, fwd=null;
+      if(fwdIdx<n) fwd=(closes[fwdIdx]-pLow)/pLow*100;
+
+      hits.push({
+        sym:sym, t:times[p], price:pLow,
+        rsi:Math.round(pRsi), drop:+dropVal.toFixed(1), bounce:+bounceVal.toFixed(1),
+        ema:+belowPct.toFixed(1), wick:+wickR.toFixed(1), close:+closePos.toFixed(2),
+        fwd: fwd===null?null:+fwd.toFixed(1)
+      });
+    }
+    return hits;
+  }
+
+  // ── binance ──
+  function getKlines(sym){
+    var url=API+"/api/v3/klines?symbol="+sym+"&interval="+TF+"&limit="+KLIMIT;
+    return fetch(url).then(function(r){return r.ok?r.json():null;})
+      .then(function(rows){
+        if(!rows)return null;
+        return rows.map(function(k){
+          return {t:k[0],o:parseFloat(k[1]),h:parseFloat(k[2]),l:parseFloat(k[3]),c:parseFloat(k[4])};
+        });
+      }).catch(function(){return null;});
+  }
+  function getTopSymbols(limit){
+    return fetch(API+"/api/v3/ticker/24hr").then(function(r){return r.json();})
+      .then(function(arr){
+        return arr.filter(function(t){
+          return t.symbol.slice(-QUOTE.length)===QUOTE
+            && parseFloat(t.quoteVolume)>0
+            && t.symbol.indexOf("UP")===-1 && t.symbol.indexOf("DOWN")===-1
+            && t.symbol.indexOf("BULL")===-1 && t.symbol.indexOf("BEAR")===-1;
+        }).sort(function(a,b){return parseFloat(b.quoteVolume)-parseFloat(a.quoteVolume);})
+          .slice(0,limit).map(function(t){return t.symbol;});
+      });
+  }
+
+  // ── state / cache ──
+  var cache={};        // sym -> candles
+  var allHits=[];      // current computed hits
+  var sortKey="when", sortDir=-1;
+
+  // ── DOM ──
+  var $=function(id){return document.getElementById(id);};
+  var symInput=$("symInput"), scanBtn=$("scanBtn"), topBtn=$("topBtn"),
+      statusEl=$("status"), rowsEl=$("rows"), summaryEl=$("summary"),
+      presetsEl=$("presets"), statsNote=$("statsNote");
+
+  PRESETS.forEach(function(p){
+    var c=document.createElement("span"); c.className="chip"; c.textContent=p;
+    c.onclick=function(){ symInput.value = symInput.value.trim()? symInput.value.trim()+", "+p : p; };
+    presetsEl.appendChild(c);
+  });
+
+  // sliders
+  function bindSlider(id,valId,key,fmt){
+    var el=$(id), v=$(valId);
+    el.addEventListener("input",function(){
+      CFG[key]=parseFloat(el.value);
+      v.textContent=fmt?fmt(el.value):el.value;
+      recompute();
+    });
+  }
+  bindSlider("p_rsi","v_rsi","rsiThr");
+  bindSlider("p_drop","v_drop","dropPct",function(x){return parseFloat(x).toFixed(1);});
+  bindSlider("p_bounce","v_bounce","bounceAtr",function(x){return parseFloat(x).toFixed(1);});
+  bindSlider("p_below","v_below","maxBelow",function(x){return parseFloat(x).toFixed(1);});
+  bindSlider("p_wick","v_wick","wickRatio",function(x){return parseFloat(x).toFixed(1);});
+  $("p_useTrend").addEventListener("change",function(){
+    CFG.useTrend=this.checked; $("trendBox").style.display=this.checked?"block":"none"; recompute();
+  });
+  $("p_useWick").addEventListener("change",function(){
+    CFG.useWick=this.checked; $("wickBox").style.display=this.checked?"block":"none"; recompute();
+  });
+
+  function fmtAgo(t){
+    var m=Math.round((Date.now()-t)/60000);
+    if(m<60)return m+"m ago";
+    var h=Math.floor(m/60); return h+"h"+(m%60?(" "+(m%60)+"m"):"")+" ago";
+  }
+  function fmtPrice(p){
+    if(p>=1)return p.toFixed(3);
+    if(p>=0.01)return p.toFixed(5);
+    return p.toPrecision(3);
+  }
+
+  function recompute(){
+    allHits=[];
+    Object.keys(cache).forEach(function(sym){
+      allHits=allHits.concat(scanHistory(sym,cache[sym]));
+    });
+    render();
+  }
+
+  function render(){
+    // sort
+    var key=sortKey, dir=sortDir;
+    var arr=allHits.slice().sort(function(a,b){
+      if(key==="sym") return dir*(a.sym<b.sym?-1:a.sym>b.sym?1:0);
+      var mk=mapKey(key), av=a[mk], bv=b[mk];
+      if(av===null)av=-999; if(bv===null)bv=-999;
+      return dir*(av-bv);
+    });
+
+    if(!arr.length){
+      rowsEl.innerHTML='<tr><td class="empty" colspan="10">No signals with current parameters. Loosen a slider.</td></tr>';
+      summaryEl.innerHTML=""; statsNote.style.display="none";
+      return;
+    }
+
+    rowsEl.innerHTML=arr.map(function(h){
+      var fwdCls = h.fwd===null?"" : (h.fwd>=0?"pos":"");
+      var fwdTxt = h.fwd===null?"—":(h.fwd>0?"+":"")+h.fwd;
+      return "<tr>"+
+        '<td class="lft sym">'+h.sym.replace(QUOTE,"")+'</td>'+
+        '<td>'+fmtAgo(h.t)+'</td>'+
+        '<td>'+fmtPrice(h.price)+'</td>'+
+        '<td class="val-r">'+h.rsi+'</td>'+
+        '<td>'+h.drop+'</td>'+
+        '<td>'+h.bounce+'</td>'+
+        '<td>'+h.ema+'</td>'+
+        '<td>'+h.wick+'</td>'+
+        '<td>'+h.close+'</td>'+
+        '<td class="'+fwdCls+'">'+fwdTxt+'</td>'+
+      "</tr>";
+    }).join("");
+
+    // summary + stats
+    var withFwd=arr.filter(function(h){return h.fwd!==null;});
+    var wins=withFwd.filter(function(h){return h.fwd>0;}).length;
+    var avgFwd=withFwd.length? (withFwd.reduce(function(s,h){return s+h.fwd;},0)/withFwd.length):0;
+    summaryEl.innerHTML=
+      '<div>signals <b>'+arr.length+'</b></div>'+
+      '<div>coins <b>'+Object.keys(cache).length+'</b></div>'+
+      (withFwd.length?'<div>+1h win-rate <b>'+Math.round(wins/withFwd.length*100)+'%</b></div>'+
+      '<div>avg +1h <b>'+(avgFwd>0?"+":"")+avgFwd.toFixed(1)+'%</b></div>':"");
+
+    // value ranges (helps find the real discriminator)
+    function rng(k){var vs=arr.map(function(h){return h[k];}).filter(function(v){return v!==null;});
+      if(!vs.length)return "—";return Math.min.apply(null,vs)+" – "+Math.max.apply(null,vs);}
+    statsNote.style.display="block";
+    statsNote.innerHTML=
+      "<b>Value ranges across these "+arr.length+" hits</b> — look for which column is <b>tightest</b> "+
+      "(that's the real discriminator) and which is scattered (probably not a filter worth using):<br>"+
+      "R "+rng("rsi")+" · D "+rng("drop")+" · B "+rng("bounce")+
+      " · E "+rng("ema")+" · W "+rng("wick")+" · C "+rng("close")+"<br>"+
+      "<b>Tip:</b> sort by <b>+1h%</b> — if the winners cluster at certain R/D/B values, tighten toward those.";
+  }
+
+  function mapKey(k){
+    return ({sym:"sym",when:"t",price:"price",rsi:"rsi",drop:"drop",
+      bounce:"bounce",ema:"ema",wick:"wick",close:"close",fwd:"fwd"})[k]||k;
+  }
+
+  // header sort
+  document.querySelectorAll("th[data-k]").forEach(function(th){
+    th.onclick=function(){
+      var k=th.getAttribute("data-k");
+      if(sortKey===k) sortDir*=-1; else {sortKey=k;sortDir=-1;}
+      render();
+    };
+  });
+
+  function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
+
+  function scanSymbols(syms){
+    scanBtn.disabled=true; topBtn.disabled=true;
+    var done=0;
+    statusEl.textContent="Fetching "+syms.length+" pair(s)…";
+    return (function loop(i){
+      if(i>=syms.length) return Promise.resolve();
+      var batch=syms.slice(i,i+BATCH);
+      return Promise.all(batch.map(function(sym){
+        return getKlines(sym).then(function(candles){
+          done++;
+          if(candles && candles.length) cache[sym]=candles;
+          statusEl.textContent="Fetched "+done+" / "+syms.length+" …";
+        });
+      })).then(function(){ return sleep(BATCH_PAUSE).then(function(){return loop(i+BATCH);}); });
+    })(0).then(function(){
+      recompute();
+      statusEl.textContent="Scanned "+Object.keys(cache).length+" coin(s) · "+allHits.length+" signals. Adjust sliders to re-filter (no re-fetch).";
+      scanBtn.disabled=false; topBtn.disabled=false;
+    });
+  }
+
+  function parseInput(){
+    return symInput.value.split(/[,\s]+/).map(function(s){return s.trim().toUpperCase();})
+      .filter(Boolean).map(function(s){ return s.slice(-QUOTE.length)===QUOTE? s : s+QUOTE; });
+  }
+
+  scanBtn.onclick=function(){
+    var syms=parseInput();
+    if(!syms.length){statusEl.textContent="Type at least one symbol.";return;}
+    cache={}; // fresh scan for typed set
+    scanSymbols(syms);
+  };
+  symInput.addEventListener("keydown",function(e){if(e.key==="Enter")scanBtn.click();});
+
+  topBtn.onclick=function(){
+    scanBtn.disabled=true; topBtn.disabled=true;
+    statusEl.textContent="Loading top symbols by volume…";
+    getTopSymbols(40).then(function(syms){
+      cache={}; scanSymbols(syms);
+    }).catch(function(){
+      statusEl.textContent="Couldn't load symbol list. Check network / CORS.";
+      scanBtn.disabled=false; topBtn.disabled=false;
+    });
+  };
+})();
+</script>
+</body>
+</html>
