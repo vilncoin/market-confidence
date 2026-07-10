@@ -211,7 +211,9 @@
     useWick:false, wickRatio:1.0
   };
   var TF="5m", KLIMIT=500, BATCH=8, BATCH_PAUSE=250, QUOTE="USDT";
-  var API="https://api.binance.com";
+  // data-api.binance.vision = Binance public market-data mirror with CORS enabled
+  // (api.binance.com blocks browser calls). Same endpoints, no auth.
+  var API="https://data-api.binance.vision";
   var PRESETS=["ESPORTS","KAT","RIF","TWT","BTC","ETH","SOL","DOGE"];
 
   // ── indicators (from WhaleHunter, verified) ──
@@ -320,15 +322,19 @@
   }
 
   // ── binance ──
+  var lastErr="";
   function getKlines(sym){
     var url=API+"/api/v3/klines?symbol="+sym+"&interval="+TF+"&limit="+KLIMIT;
-    return fetch(url).then(function(r){return r.ok?r.json():null;})
+    return fetch(url).then(function(r){
+        if(!r.ok){ lastErr=sym+": HTTP "+r.status; return null; }
+        return r.json();
+      })
       .then(function(rows){
         if(!rows)return null;
         return rows.map(function(k){
           return {t:k[0],o:parseFloat(k[1]),h:parseFloat(k[2]),l:parseFloat(k[3]),c:parseFloat(k[4])};
         });
-      }).catch(function(){return null;});
+      }).catch(function(e){ lastErr=sym+": "+(e&&e.message||"fetch failed"); return null;});
   }
   function getTopSymbols(limit){
     return fetch(API+"/api/v3/ticker/24hr").then(function(r){return r.json();})
@@ -487,7 +493,12 @@
       })).then(function(){ return sleep(BATCH_PAUSE).then(function(){return loop(i+BATCH);}); });
     })(0).then(function(){
       recompute();
-      statusEl.textContent="Scanned "+Object.keys(cache).length+" coin(s) · "+allHits.length+" signals. Adjust sliders to re-filter (no re-fetch).";
+      var loaded=Object.keys(cache).length;
+      if(loaded===0){
+        statusEl.textContent="No data loaded. "+(lastErr?("Last error — "+lastErr):"Check the symbol names.");
+      } else {
+        statusEl.textContent="Scanned "+loaded+" coin(s) · "+allHits.length+" signals. Adjust sliders to re-filter (no re-fetch).";
+      }
       scanBtn.disabled=false; topBtn.disabled=false;
     });
   }
