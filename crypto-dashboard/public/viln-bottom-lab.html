@@ -169,6 +169,24 @@
         <label>&nbsp;&nbsp;&nbsp;min wick / body <b id="v_wick">1.0</b></label>
         <input type="range" id="p_wick" min="0" max="5" step="0.1" value="1">
       </div>
+
+      <div style="border-top:1px solid var(--line);margin:14px 0 12px"></div>
+      <h2 style="margin-bottom:12px">Win rule</h2>
+      <div class="param">
+        <label>Target gain % <b id="v_winpct">1.5</b></label>
+        <input type="range" id="p_winpct" min="0.3" max="5" step="0.1" value="1.5">
+        <div class="hint">WIN if price rises this much above the low first…</div>
+      </div>
+      <div class="param">
+        <label>Stop loss % <b id="v_stoppct">1.5</b></label>
+        <input type="range" id="p_stoppct" min="0.3" max="5" step="0.1" value="1.5">
+        <div class="hint">…LOSS if it drops this much below the low first</div>
+      </div>
+      <div class="param">
+        <label>…within (minutes) <b id="v_winbars">60</b></label>
+        <input type="range" id="p_winbars" min="3" max="36" step="1" value="12">
+        <div class="hint">time window; if neither is hit, judged by closing price</div>
+      </div>
     </div>
   </div>
 
@@ -188,7 +206,8 @@
           <th data-k="ema">E%</th>
           <th data-k="wick">W</th>
           <th data-k="close">C</th>
-          <th data-k="fwd">+1h%</th>
+          <th data-k="peak">peak%</th>
+          <th data-k="res">W/L</th>
         </tr>
       </thead>
       <tbody id="rows"><tr><td class="empty" colspan="10">No scan yet.</td></tr></tbody>
@@ -199,7 +218,8 @@
     <span><b>R</b> rsi</span><span><b>D</b> drop from recent high</span>
     <span><b>B</b> bounce in ATR</span><span><b>E</b> % below EMA50</span>
     <span><b>W</b> lower-wick ÷ body</span><span><b>C</b> close position in bar (0=low,1=high)</span>
-    <span><b>+1h</b> price change 12 bars later (was it a real bottom?)</span>
+    <span><b>peak</b> best % above low within the window</span>
+    <span><b>W/L</b> win = target hit first · loss = stop hit first · flat = neither</span>
   </div>
 
   <div class="stats-note" id="statsNote" style="display:none"></div>
@@ -214,7 +234,8 @@
     rsiLen:14, leftBars:5, rightBars:3, lowWin:150, dropWin:24, emaLen:50,
     rsiThr:33, dropPct:1.5, bounceAtr:0.5,
     useTrend:false, maxBelow:3.0,
-    useWick:false, wickRatio:1.0
+    useWick:false, wickRatio:1.0,
+    winPct:1.5, winBars:12, stopPct:1.5
   };
   var TF="5m", KLIMIT=500, BATCH=8, BATCH_PAUSE=250, QUOTE="USDT";
   // data-api.binance.vision = Binance public market-data mirror with CORS enabled
@@ -313,15 +334,25 @@
       if(CFG.useTrend && !(belowPct<=CFG.maxBelow || dropVal>=CFG.dropPct*3)) continue;
       if(CFG.useWick && !(wickR>=CFG.wickRatio && closePos>=0.4)) continue;
 
-      // forward return: price 12 bars (1h) after pivot vs pivot low
-      var fwdIdx=p+12, fwd=null;
-      if(fwdIdx<n) fwd=(closes[fwdIdx]-pLow)/pLow*100;
+      // forward path: for each future bar record %high and %low vs pivot low,
+      // so we can replay "did target (+X%) or stop (-Y%) come first" for any rule.
+      var WINMAX=36; // 3h at 5m
+      var fpath=[];
+      for(var f=1; f<=WINMAX; f++){
+        var fi=p+f;
+        if(fi>=n){ fpath.push(null); continue; }
+        fpath.push({
+          hi:+((highs[fi]-pLow)/pLow*100).toFixed(2),
+          lo:+((lows[fi]-pLow)/pLow*100).toFixed(2),
+          cl:+((closes[fi]-pLow)/pLow*100).toFixed(2)
+        });
+      }
 
       hits.push({
         sym:sym, t:times[p], price:pLow,
         rsi:Math.round(pRsi), drop:+dropVal.toFixed(1), bounce:+bounceVal.toFixed(1),
         ema:+belowPct.toFixed(1), wick:+wickR.toFixed(1), close:+closePos.toFixed(2),
-        fwd: fwd===null?null:+fwd.toFixed(1)
+        fpath:fpath
       });
     }
     return hits;
@@ -385,6 +416,16 @@
   bindSlider("p_drop","v_drop","dropPct",function(x){return parseFloat(x).toFixed(1);});
   bindSlider("p_bounce","v_bounce","bounceAtr",function(x){return parseFloat(x).toFixed(1);});
   bindSlider("p_right","v_right","rightBars");
+  bindSlider("p_winpct","v_winpct","winPct",function(x){return parseFloat(x).toFixed(1);});
+  bindSlider("p_stoppct","v_stoppct","stopPct",function(x){return parseFloat(x).toFixed(1);});
+  (function(){
+    var el=$("p_winbars"), v=$("v_winbars");
+    el.addEventListener("input",function(){
+      CFG.winBars=parseInt(el.value,10);
+      v.textContent=(CFG.winBars*5); // minutes
+      render(); // win rule only affects verdict, not which bars are signals → no rescan needed
+    });
+  })();
   bindSlider("p_below","v_below","maxBelow",function(x){return parseFloat(x).toFixed(1);});
   bindSlider("p_wick","v_wick","wickRatio",function(x){return parseFloat(x).toFixed(1);});
   $("p_useTrend").addEventListener("change",function(){
@@ -413,25 +454,60 @@
     render();
   }
 
+  // verdict: replay forward path bar-by-bar. Whichever of target(+winPct) / stop(-stopPct)
+  // is touched first wins. If neither by window end, judge by the close at window end.
+  function verdict(h){
+    if(!h.fpath) return {peak:null,res:null};
+    var end=Math.min(CFG.winBars, h.fpath.length);
+    var peak=null, tgt=CFG.winPct, stp=-CFG.stopPct;
+    for(var i=0;i<end;i++){
+      var b=h.fpath[i];
+      if(!b) break;
+      if(peak===null||b.hi>peak) peak=b.hi;
+      var hitT=b.hi>=tgt, hitS=b.lo<=stp;
+      if(hitT) return {peak:peak,res:"win"};   // if both in one bar, assume target hit first
+      if(hitS) return {peak:peak,res:"loss"};
+    }
+    // neither touched → use close at window end
+    var last=null;
+    for(var j=end-1;j>=0;j--){ if(h.fpath[j]){last=h.fpath[j];break;} }
+    if(last===null) return {peak:peak,res:null};
+    return {peak:peak, res: last.cl>=0?"flat+":"flat-"};
+  }
+
   function render(){
-    // sort
     var key=sortKey, dir=sortDir;
+    // decorate with verdict for sorting/display
+    allHits.forEach(function(h){
+      var v=verdict(h);
+      h._peak=v.peak; h._res=v.res;
+      // numeric win flag for stats: win / flat+ = 1 ; loss / flat- = 0 ; null = null
+      h._win = v.res===null?null : (v.res==="win"||v.res==="flat+")?1:0;
+    });
+
     var arr=allHits.slice().sort(function(a,b){
       if(key==="sym") return dir*(a.sym<b.sym?-1:a.sym>b.sym?1:0);
       var mk=mapKey(key), av=a[mk], bv=b[mk];
-      if(av===null)av=-999; if(bv===null)bv=-999;
+      if(av===null||av===undefined)av=-999; if(bv===null||bv===undefined)bv=-999;
       return dir*(av-bv);
     });
 
     if(!arr.length){
-      rowsEl.innerHTML='<tr><td class="empty" colspan="10">No signals with current parameters. Loosen a slider.</td></tr>';
+      rowsEl.innerHTML='<tr><td class="empty" colspan="11">No signals with current parameters. Loosen a slider.</td></tr>';
       summaryEl.innerHTML=""; statsNote.style.display="none";
       return;
     }
 
+    function resBadge(r){
+      if(r===null) return '<span style="color:var(--ink-faint)">·</span>';
+      if(r==="win")  return '<span class="badge">WIN</span>';
+      if(r==="loss") return '<span class="badge" style="background:rgba(255,84,112,.14);color:var(--down)">LOSS</span>';
+      if(r==="flat+")return '<span class="badge" style="background:rgba(255,180,84,.14);color:var(--amber)">flat+</span>';
+      return '<span class="badge" style="background:rgba(255,180,84,.10);color:var(--ink-dim)">flat−</span>';
+    }
+
     rowsEl.innerHTML=arr.map(function(h){
-      var fwdCls = h.fwd===null?"" : (h.fwd>=0?"pos":"");
-      var fwdTxt = h.fwd===null?"—":(h.fwd>0?"+":"")+h.fwd;
+      var peakTxt = h._peak===null?"—":"+"+h._peak.toFixed(1);
       return "<tr>"+
         '<td class="lft sym">'+h.sym.replace(QUOTE,"")+'</td>'+
         '<td>'+fmtAgo(h.t)+'</td>'+
@@ -442,35 +518,44 @@
         '<td>'+h.ema+'</td>'+
         '<td>'+h.wick+'</td>'+
         '<td>'+h.close+'</td>'+
-        '<td class="'+fwdCls+'">'+fwdTxt+'</td>'+
+        '<td class="'+(h._peak>=CFG.winPct?"pos":"")+'">'+peakTxt+'</td>'+
+        '<td>'+resBadge(h._res)+'</td>'+
       "</tr>";
     }).join("");
 
-    // summary + stats
-    var withFwd=arr.filter(function(h){return h.fwd!==null;});
-    var wins=withFwd.filter(function(h){return h.fwd>0;}).length;
-    var avgFwd=withFwd.length? (withFwd.reduce(function(s,h){return s+h.fwd;},0)/withFwd.length):0;
+    // summary: win-rate on the current target/stop rule
+    var judged=arr.filter(function(h){return h._win!==null;});
+    var wins=judged.filter(function(h){return h._win===1;}).length;
+    var avgPeak=judged.length? (judged.reduce(function(s,h){return s+h._peak;},0)/judged.length):0;
+    var wr=judged.length? Math.round(wins/judged.length*100):0;
+    // expectancy: win% * target - loss% * stop  (rough per-trade edge)
+    var lossRate=judged.length?(judged.length-wins)/judged.length:0;
+    var edge=(wins/(judged.length||1))*CFG.winPct - lossRate*CFG.stopPct;
     summaryEl.innerHTML=
       '<div>signals <b>'+arr.length+'</b></div>'+
       '<div>coins <b>'+Object.keys(cache).length+'</b></div>'+
-      (withFwd.length?'<div>+1h win-rate <b>'+Math.round(wins/withFwd.length*100)+'%</b></div>'+
-      '<div>avg +1h <b>'+(avgFwd>0?"+":"")+avgFwd.toFixed(1)+'%</b></div>':"");
+      (judged.length?
+        '<div>win-rate <b>'+wr+'%</b> <span style="color:var(--ink-faint)">('+wins+'/'+judged.length+')</span></div>'+
+        '<div>rule <b>+'+CFG.winPct.toFixed(1)+'% / −'+CFG.stopPct.toFixed(1)+'% in '+(CFG.winBars*5)+'m</b></div>'+
+        '<div>edge/trade <b style="color:'+(edge>=0?"var(--signal)":"var(--down)")+'">'+(edge>=0?"+":"")+edge.toFixed(2)+'%</b></div>':"");
 
-    // value ranges (helps find the real discriminator)
-    function rng(k){var vs=arr.map(function(h){return h[k];}).filter(function(v){return v!==null;});
-      if(!vs.length)return "—";return Math.min.apply(null,vs)+" – "+Math.max.apply(null,vs);}
+    // WIN vs LOSS averages to expose the real discriminator
+    function avgOf(list,k){if(!list.length)return "—";return (list.reduce(function(s,h){return s+h[k];},0)/list.length).toFixed(1);}
+    var W=judged.filter(function(h){return h._win===1;}), L=judged.filter(function(h){return h._win===0;});
     statsNote.style.display="block";
     statsNote.innerHTML=
-      "<b>Value ranges across these "+arr.length+" hits</b> — look for which column is <b>tightest</b> "+
-      "(that's the real discriminator) and which is scattered (probably not a filter worth using):<br>"+
-      "R "+rng("rsi")+" · D "+rng("drop")+" · B "+rng("bounce")+
-      " · E "+rng("ema")+" · W "+rng("wick")+" · C "+rng("close")+"<br>"+
-      "<b>Tip:</b> sort by <b>+1h%</b> — if the winners cluster at certain R/D/B values, tighten toward those.";
+      "<b>WIN vs LOSS averages</b> — a column where WIN and LOSS differ clearly is a filter worth adding; similar numbers = that column doesn't separate good bottoms:<br>"+
+      '<span style="color:var(--signal)">WIN&nbsp;('+W.length+')</span>&nbsp; '+
+      "R "+avgOf(W,"rsi")+" · D "+avgOf(W,"drop")+" · B "+avgOf(W,"bounce")+" · E "+avgOf(W,"ema")+" · Wk "+avgOf(W,"wick")+" · C "+avgOf(W,"close")+"<br>"+
+      '<span style="color:var(--down)">LOSS ('+L.length+')</span>&nbsp; '+
+      "R "+avgOf(L,"rsi")+" · D "+avgOf(L,"drop")+" · B "+avgOf(L,"bounce")+" · E "+avgOf(L,"ema")+" · Wk "+avgOf(L,"wick")+" · C "+avgOf(L,"close")+"<br>"+
+      '<span style="color:var(--ink-faint)">edge/trade = win%×target − loss%×stop. Positive = the rule makes money on average.</span>';
   }
 
   function mapKey(k){
     return ({sym:"sym",when:"t",price:"price",rsi:"rsi",drop:"drop",
-      bounce:"bounce",ema:"ema",wick:"wick",close:"close",fwd:"fwd"})[k]||k;
+      bounce:"bounce",ema:"ema",wick:"wick",close:"close",
+      peak:"_peak",res:"_win"})[k]||k;
   }
 
   // header sort
