@@ -56,12 +56,16 @@
   .thesis p{margin:0;font-size:12.5px;line-height:1.55;color:var(--ink-dim)}
   .thesis b{color:var(--ink)}
 
-  /* progress bar */
-  .progress{display:flex;align-items:center;gap:12px;margin-bottom:14px;
-    font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
-  .bar{flex:1;height:3px;background:var(--panel-2);border-radius:2px;overflow:hidden}
-  .bar-fill{height:100%;width:0;background:var(--hunt);border-radius:2px;
-    transition:width .4s ease}
+  /* radar sweep line — ambient "scanning" feel, no progress numbers */
+  .sweepline{position:relative;height:2px;margin:0 0 16px;border-radius:2px;
+    background:var(--panel-2);overflow:visible}
+  .sweep-glow{position:absolute;top:0;left:0;height:100%;width:34%;border-radius:2px;
+    background:linear-gradient(90deg,transparent,var(--hunt),transparent);
+    animation:sweep-move 2.4s ease-in-out infinite}
+  @keyframes sweep-move{
+    0%{left:-34%}100%{left:100%}}
+  .sweep-label{position:absolute;right:0;top:8px;font-family:var(--mono);
+    font-size:10.5px;color:var(--ink-faint);letter-spacing:.03em}
 
   /* feed */
   .feed{display:flex;flex-direction:column;gap:10px}
@@ -117,7 +121,7 @@
         <p class="sub">Bottom-signal scanner · live market</p>
       </div>
     </div>
-    <div class="scan-state"><span class="radar"></span><span id="scanTxt">starting scan…</span></div>
+    <div class="scan-state"><span class="radar"></span><span id="scanTxt">radar active</span></div>
   </div>
 
   <div class="divider"></div>
@@ -127,10 +131,9 @@
     <p>WhaleHunter scans <b>the entire market</b> for one setup: a coin that just <b>oversold, dropped hard, and started bouncing off a real bottom</b>. When all conditions line up, it shows up below — newest first. This is information, not advice: it tells you a bottom pattern formed, it doesn't tell you to buy.</p>
   </div>
 
-  <div class="progress">
-    <span id="progTxt">scanning 0 / 0</span>
-    <div class="bar"><div class="bar-fill" id="progFill"></div></div>
-    <span id="foundTxt">0 signals</span>
+  <div class="sweepline">
+    <span class="sweep-glow"></span>
+    <span class="sweep-label" id="foundTxt">0 signals this session</span>
   </div>
 
   <div class="feed" id="feed">
@@ -261,8 +264,6 @@
   var symbols=[], feed=[], seen={}, booted=false, running=false;
   var feedEl=document.getElementById("feed");
   var scanTxt=document.getElementById("scanTxt");
-  var progTxt=document.getElementById("progTxt");
-  var progFill=document.getElementById("progFill");
   var foundTxt=document.getElementById("foundTxt");
   var statusLine=document.getElementById("statusLine");
 
@@ -336,11 +337,9 @@
     return (function loop(i){
       if(i>=symbols.length) return Promise.resolve();
       var batch=symbols.slice(i, i+BATCH);
-      progTxt.textContent="scanning "+Math.min(i+BATCH,symbols.length)+" / "+symbols.length;
-      progFill.style.width=Math.round(Math.min(i+BATCH,symbols.length)/symbols.length*100)+"%";
       return scanBatch(batch).then(function(){
         renderFeed();
-        foundTxt.textContent=feed.length+" signal"+(feed.length===1?"":"s");
+        foundTxt.textContent=feed.length+" signal"+(feed.length===1?"":"s")+" this session";
         return sleep(BATCH_PAUSE).then(function(){ return loop(i+BATCH); });
       });
     })(0);
@@ -349,16 +348,16 @@
   function run(){
     if(running) return;
     running=true;
-    scanTxt.textContent="scanning market…";
+    scanTxt.textContent="sweeping…";
     fullSweep().then(function(){
       booted=true;   // first sweep only seeds state (no backlog spam)
-      scanTxt.textContent="watching · re-scanning";
+      scanTxt.textContent="radar active · hunting";
       statusLine.textContent="Swept "+symbols.length+" pairs · "+
         new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});
       running=false;
       setTimeout(run, CYCLE_PAUSE);   // continuous re-scan
     }).catch(function(){
-      scanTxt.textContent="scan error — retrying";
+      scanTxt.textContent="signal lost · retrying";
       running=false;
       setTimeout(run, CYCLE_PAUSE);
     });
