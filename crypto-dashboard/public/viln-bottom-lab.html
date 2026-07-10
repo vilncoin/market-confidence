@@ -228,6 +228,18 @@
   </div>
 
   <div class="stats-note" id="statsNote" style="display:none"></div>
+
+  <div id="equityWrap" style="display:none;margin-top:16px">
+    <div class="card">
+      <h2>Equity curve · $100 start</h2>
+      <div id="equityStats" style="display:flex;gap:20px;flex-wrap:wrap;font-family:var(--mono);font-size:12px;color:var(--ink-dim);margin-bottom:12px"></div>
+      <div id="equityChart"></div>
+      <div style="font-size:11px;color:var(--ink-faint);font-family:var(--mono);margin-top:8px">
+        Trades taken in time order. Each trade risks a fixed % of current balance; net return per trade = outcome − fee.
+        Max drawdown = worst peak-to-valley dip along the way.
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -544,7 +556,8 @@
       if(h._res==="win") gross=CFG.winPct;
       else if(h._res==="loss") gross=-CFG.stopPct;
       else gross=(h._closeRet!==undefined&&h._closeRet!==null)?h._closeRet:0; // flat: actual close
-      totNet += (gross - fee);
+      h._net = gross - fee; // net % return of this trade
+      totNet += h._net;
     });
     var edge = nJudged? totNet/nJudged : 0;
 
@@ -567,6 +580,78 @@
       '<span style="color:var(--down)">LOSS ('+L.length+')</span>&nbsp; '+
       "R "+avgOf(L,"rsi")+" · D "+avgOf(L,"drop")+" · B "+avgOf(L,"bounce")+" · E "+avgOf(L,"ema")+" · Wk "+avgOf(L,"wick")+" · C "+avgOf(L,"close")+"<br>"+
       '<span style="color:var(--ink-faint)">edge/trade = win%×target − loss%×stop. Positive = the rule makes money on average.</span>';
+
+    renderEquity(judged);
+  }
+
+  // ── equity curve: compound $100 through trades in time order, at 50% and 30% sizing ──
+  function renderEquity(judged){
+    var wrap=$("equityWrap");
+    if(!judged || judged.length<2){ wrap.style.display="none"; return; }
+    wrap.style.display="block";
+
+    // chronological order
+    var seq=judged.slice().sort(function(a,b){return a.t-b.t;});
+
+    function simulate(frac){
+      var bal=100, curve=[100], peak=100, maxDD=0;
+      for(var i=0;i<seq.length;i++){
+        var r=seq[i]._net/100;           // net return of trade as fraction
+        bal = bal * (1 + frac*r);        // only `frac` of balance is exposed
+        if(bal>peak) peak=bal;
+        var dd=(peak-bal)/peak;
+        if(dd>maxDD) maxDD=dd;
+        curve.push(bal);
+      }
+      return {curve:curve, end:bal, maxDD:maxDD*100};
+    }
+
+    var s50=simulate(0.5), s30=simulate(0.3);
+
+    // stats line
+    $("equityStats").innerHTML=
+      '<div><span style="color:var(--hunt-hi)">■</span> 50% sizing → <b style="color:'+(s50.end>=100?"var(--signal)":"var(--down)")+'">$'+s50.end.toFixed(2)+'</b> <span style="color:var(--ink-faint)">(maxDD −'+s50.maxDD.toFixed(1)+'%)</span></div>'+
+      '<div><span style="color:var(--amber)">■</span> 30% sizing → <b style="color:'+(s30.end>=100?"var(--signal)":"var(--down)")+'">$'+s30.end.toFixed(2)+'</b> <span style="color:var(--ink-faint)">(maxDD −'+s30.maxDD.toFixed(1)+'%)</span></div>'+
+      '<div style="color:var(--ink-faint)">'+seq.length+' trades over '+fmtSpan(seq[0].t, seq[seq.length-1].t)+'</div>';
+
+    // draw SVG
+    $("equityChart").innerHTML=svgCurve([
+      {curve:s50.curve, color:"var(--hunt-hi)"},
+      {curve:s30.curve, color:"var(--amber)"}
+    ]);
+  }
+
+  function fmtSpan(a,b){
+    var h=Math.round((b-a)/3600000);
+    if(h<48) return h+"h";
+    return Math.round(h/24)+"d";
+  }
+
+  function svgCurve(series){
+    var W=1000, H=260, padL=48, padR=12, padT=14, padB=24;
+    var all=[]; series.forEach(function(s){ s.curve.forEach(function(v){all.push(v);}); });
+    var lo=Math.min.apply(null,all), hi=Math.max.apply(null,all);
+    if(lo===hi){lo-=1;hi+=1;}
+    var n=series[0].curve.length;
+    function X(i){ return padL + (W-padL-padR)*(i/(n-1)); }
+    function Y(v){ return padT + (H-padT-padB)*(1-(v-lo)/(hi-lo)); }
+
+    var out='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;font-family:var(--mono)">';
+    // baseline at $100
+    var y100=Y(100);
+    out+='<line x1="'+padL+'" y1="'+y100+'" x2="'+(W-padR)+'" y2="'+y100+'" stroke="var(--line-hi)" stroke-dasharray="4 4"/>';
+    out+='<text x="'+(padL-6)+'" y="'+(y100+3)+'" text-anchor="end" fill="var(--ink-faint)" font-size="10">$100</text>';
+    // y labels top/bottom
+    out+='<text x="'+(padL-6)+'" y="'+(Y(hi)+3)+'" text-anchor="end" fill="var(--ink-faint)" font-size="10">$'+hi.toFixed(0)+'</text>';
+    out+='<text x="'+(padL-6)+'" y="'+(Y(lo)+3)+'" text-anchor="end" fill="var(--ink-faint)" font-size="10">$'+lo.toFixed(0)+'</text>';
+    // curves
+    series.forEach(function(s){
+      var d="";
+      s.curve.forEach(function(v,i){ d+=(i?"L":"M")+X(i).toFixed(1)+" "+Y(v).toFixed(1)+" "; });
+      out+='<path d="'+d+'" fill="none" stroke="'+s.color+'" stroke-width="2"/>';
+    });
+    out+='</svg>';
+    return out;
   }
 
   function mapKey(k){
