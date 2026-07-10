@@ -656,6 +656,17 @@
                   .sort(function(a,b){return a._entryT-b._entryT;});
     if(seq.length<2){ wrap.style.display="none"; return; }
 
+    // Multi-coin: top-N returns ~recent bars, but a few coins can carry older/sparse
+    // timestamps that stretch the timeline unrealistically. Trim to the fresh window
+    // (most recent contiguous span) so the day-count reflects reality, not outliers.
+    if(!deepMode){
+      var newest=seq[seq.length-1]._entryT;
+      // keep the densest recent block: signals within the last 4 days of newest
+      var cutoff=newest - 4*86400000;
+      var trimmed=seq.filter(function(h){return h._entryT>=cutoff;});
+      if(trimmed.length>=2) seq=trimmed;
+    }
+
     // Event-driven: walk time. At each signal entry, if a position slot is free,
     // open a trade using posPct of *current* balance; realize P&L at its exit time.
     // Balance updates as trades close, so capital is shared realistically.
