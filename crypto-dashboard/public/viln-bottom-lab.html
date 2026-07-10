@@ -187,6 +187,11 @@
         <input type="range" id="p_winbars" min="3" max="36" step="1" value="12">
         <div class="hint">time window; if neither is hit, judged by closing price</div>
       </div>
+      <div class="param">
+        <label>Round-trip fee % <b id="v_fee">0.10</b></label>
+        <input type="range" id="p_fee" min="0" max="0.4" step="0.01" value="0.1">
+        <div class="hint">entry+exit fees. Binance futures taker ≈ 0.10%, spot taker ≈ 0.20%</div>
+      </div>
     </div>
   </div>
 
@@ -235,7 +240,7 @@
     rsiThr:33, dropPct:1.5, bounceAtr:0.5,
     useTrend:false, maxBelow:3.0,
     useWick:false, wickRatio:1.0,
-    winPct:1.5, winBars:12, stopPct:1.5
+    winPct:1.5, winBars:12, stopPct:1.5, feePct:0.1
   };
   var TF="5m", KLIMIT=500, BATCH=8, BATCH_PAUSE=250, QUOTE="USDT";
   // data-api.binance.vision = Binance public market-data mirror with CORS enabled
@@ -418,6 +423,7 @@
   bindSlider("p_right","v_right","rightBars");
   bindSlider("p_winpct","v_winpct","winPct",function(x){return parseFloat(x).toFixed(1);});
   bindSlider("p_stoppct","v_stoppct","stopPct",function(x){return parseFloat(x).toFixed(1);});
+  bindSlider("p_fee","v_fee","feePct",function(x){return parseFloat(x).toFixed(2);});
   (function(){
     var el=$("p_winbars"), v=$("v_winbars");
     el.addEventListener("input",function(){
@@ -471,8 +477,8 @@
     // neither touched → use close at window end
     var last=null;
     for(var j=end-1;j>=0;j--){ if(h.fpath[j]){last=h.fpath[j];break;} }
-    if(last===null) return {peak:peak,res:null};
-    return {peak:peak, res: last.cl>=0?"flat+":"flat-"};
+    if(last===null) return {peak:peak,res:null,closeRet:null};
+    return {peak:peak, res: last.cl>=0?"flat+":"flat-", closeRet:last.cl};
   }
 
   function render(){
@@ -480,7 +486,7 @@
     // decorate with verdict for sorting/display
     allHits.forEach(function(h){
       var v=verdict(h);
-      h._peak=v.peak; h._res=v.res;
+      h._peak=v.peak; h._res=v.res; h._closeRet=v.closeRet;
       // numeric win flag for stats: win / flat+ = 1 ; loss / flat- = 0 ; null = null
       h._win = v.res===null?null : (v.res==="win"||v.res==="flat+")?1:0;
     });
@@ -528,16 +534,27 @@
     var wins=judged.filter(function(h){return h._win===1;}).length;
     var avgPeak=judged.length? (judged.reduce(function(s,h){return s+h._peak;},0)/judged.length):0;
     var wr=judged.length? Math.round(wins/judged.length*100):0;
-    // expectancy: win% * target - loss% * stop  (rough per-trade edge)
-    var lossRate=judged.length?(judged.length-wins)/judged.length:0;
-    var edge=(wins/(judged.length||1))*CFG.winPct - lossRate*CFG.stopPct;
+
+    // realistic per-trade net P&L including fees.
+    // win => +target−fee ; loss => −stop−fee ; flat => actual close return − fee
+    var fee=CFG.feePct;
+    var totNet=0, nJudged=judged.length;
+    judged.forEach(function(h){
+      var gross;
+      if(h._res==="win") gross=CFG.winPct;
+      else if(h._res==="loss") gross=-CFG.stopPct;
+      else gross=(h._closeRet!==undefined&&h._closeRet!==null)?h._closeRet:0; // flat: actual close
+      totNet += (gross - fee);
+    });
+    var edge = nJudged? totNet/nJudged : 0;
+
     summaryEl.innerHTML=
       '<div>signals <b>'+arr.length+'</b></div>'+
       '<div>coins <b>'+Object.keys(cache).length+'</b></div>'+
       (judged.length?
         '<div>win-rate <b>'+wr+'%</b> <span style="color:var(--ink-faint)">('+wins+'/'+judged.length+')</span></div>'+
-        '<div>rule <b>+'+CFG.winPct.toFixed(1)+'% / −'+CFG.stopPct.toFixed(1)+'% in '+(CFG.winBars*5)+'m</b></div>'+
-        '<div>edge/trade <b style="color:'+(edge>=0?"var(--signal)":"var(--down)")+'">'+(edge>=0?"+":"")+edge.toFixed(2)+'%</b></div>':"");
+        '<div>rule <b>+'+CFG.winPct.toFixed(1)+'% / −'+CFG.stopPct.toFixed(1)+'% · fee '+fee.toFixed(2)+'%</b></div>'+
+        '<div>net edge/trade <b style="color:'+(edge>=0?"var(--signal)":"var(--down)")+'">'+(edge>=0?"+":"")+edge.toFixed(2)+'%</b></div>':"");
 
     // WIN vs LOSS averages to expose the real discriminator
     function avgOf(list,k){if(!list.length)return "—";return (list.reduce(function(s,h){return s+h[k];},0)/list.length).toFixed(1);}
