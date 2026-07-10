@@ -135,6 +135,13 @@
         <div style="font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-bottom:6px">or scan top coins by volume:</div>
         <div class="presets" id="topBtns"></div>
       </div>
+      <div style="border-top:1px solid var(--line);margin:14px 0 10px"></div>
+      <div style="font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-bottom:6px">deep backtest — one coin, many days:</div>
+      <div class="scan-row">
+        <input id="deepSym" placeholder="one symbol e.g. BTC" spellcheck="false">
+        <button class="btn ghost" id="deepBtn">Backtest</button>
+      </div>
+      <div class="presets" id="deepBars"></div>
     </div>
 
     <div class="card">
@@ -377,6 +384,26 @@
 
   // ── binance ──
   var lastErr="";
+  // deep fetch: page backwards to gather up to `bars` candles for one symbol
+  function getKlinesDeep(sym, bars, onProgress){
+    var per=1000, collected=[], endTime=null;
+    function page(){
+      var url=API+"/api/v3/klines?symbol="+sym+"&interval="+TF+"&limit="+per+(endTime?("&endTime="+endTime):"");
+      return fetch(url).then(function(r){
+        if(!r.ok){ lastErr=sym+(r.status===400?" — not a Binance pair (400)":" HTTP "+r.status); return null; }
+        return r.json();
+      }).then(function(rows){
+        if(!rows||!rows.length) return collected;
+        var mapped=rows.map(function(k){return {t:k[0],o:parseFloat(k[1]),h:parseFloat(k[2]),l:parseFloat(k[3]),c:parseFloat(k[4])};});
+        collected = mapped.concat(collected); // prepend older
+        if(onProgress) onProgress(collected.length);
+        if(collected.length>=bars || rows.length<per) return collected;
+        endTime = rows[0][0]-1; // step further back
+        return sleep(BATCH_PAUSE).then(page);
+      }).catch(function(e){ lastErr=sym+": "+(e&&e.message||"fetch failed"); return collected; });
+    }
+    return page();
+  }
   function getKlines(sym){
     var url=API+"/api/v3/klines?symbol="+sym+"&interval="+TF+"&limit="+KLIMIT;
     return fetch(url).then(function(r){
@@ -412,7 +439,9 @@
   var $=function(id){return document.getElementById(id);};
   var symInput=$("symInput"), scanBtn=$("scanBtn"),
       statusEl=$("status"), rowsEl=$("rows"), summaryEl=$("summary"),
-      presetsEl=$("presets"), statsNote=$("statsNote"), topBtnsEl=$("topBtns");
+      presetsEl=$("presets"), statsNote=$("statsNote"), topBtnsEl=$("topBtns"),
+      deepSymEl=$("deepSym"), deepBtn=$("deepBtn"), deepBarsEl=$("deepBars");
+  var deepMode=false, deepBarsN=3000, deepSpanMs=0;
 
   PRESETS.forEach(function(p){
     var c=document.createElement("span"); c.className="chip"; c.textContent=p;
@@ -609,10 +638,19 @@
     var s50=simulate(0.5), s30=simulate(0.3);
 
     // stats line
+    var spanTxt, modeNote;
+    if(deepMode){
+      var days=(deepSpanMs/86400000).toFixed(1);
+      spanTxt = seq.length+" trades · "+days+" days (one continuous coin)";
+      modeNote = "";
+    } else {
+      spanTxt = seq.length+" trades across many coins";
+      modeNote = '<div style="color:var(--amber);font-size:11px;margin-top:2px">⚠ multi-coin blend — signals from different coins strung together, not one real account. Use "deep backtest" (left) for a true single-coin equity curve.</div>';
+    }
     $("equityStats").innerHTML=
       '<div><span style="color:var(--hunt-hi)">■</span> 50% sizing → <b style="color:'+(s50.end>=100?"var(--signal)":"var(--down)")+'">$'+s50.end.toFixed(2)+'</b> <span style="color:var(--ink-faint)">(maxDD −'+s50.maxDD.toFixed(1)+'%)</span></div>'+
       '<div><span style="color:var(--amber)">■</span> 30% sizing → <b style="color:'+(s30.end>=100?"var(--signal)":"var(--down)")+'">$'+s30.end.toFixed(2)+'</b> <span style="color:var(--ink-faint)">(maxDD −'+s30.maxDD.toFixed(1)+'%)</span></div>'+
-      '<div style="color:var(--ink-faint)">'+seq.length+' trades over '+fmtSpan(seq[0].t, seq[seq.length-1].t)+'</div>';
+      '<div style="color:var(--ink-faint)">'+spanTxt+'</div>'+modeNote;
 
     // draw SVG
     $("equityChart").innerHTML=svgCurve([
@@ -677,6 +715,7 @@
   }
 
   function scanSymbols(syms){
+    deepMode=false;
     setBusy(true);
     var done=0, total=syms.length;
     statusEl.textContent="Fetching "+total+" pair(s)…";
@@ -732,6 +771,47 @@
     };
     topBtnsEl.appendChild(b);
   });
+
+  // deep-backtest bar-count presets (5m bars: 1000≈3.5d, 3000≈10d, 6000≈21d, 12000≈42d)
+  [[1000,"~3d"],[3000,"~10d"],[6000,"~21d"],[12000,"~42d"]].forEach(function(pair){
+    var c=document.createElement("span"); c.className="chip";
+    c.textContent=pair[1]; c.dataset.bars=pair[0];
+    c.onclick=function(){
+      Array.prototype.forEach.call(deepBarsEl.children,function(x){x.style.borderColor="";x.style.color="";});
+      c.style.borderColor="var(--hunt)"; c.style.color="var(--hunt)";
+      deepBarsN=pair[0];
+    };
+    deepBarsEl.appendChild(c);
+    if(pair[0]===3000){ c.style.borderColor="var(--hunt)"; c.style.color="var(--hunt)"; }
+  });
+
+  deepBtn.onclick=function(){
+    var raw=deepSymEl.value.trim().toUpperCase();
+    if(!raw){ statusEl.textContent="Type one symbol for the deep backtest."; return; }
+    var sym = raw.slice(-QUOTE.length)===QUOTE? raw : raw+QUOTE;
+    setBusy(true); deepBtn.disabled=true;
+    statusEl.textContent="Deep-fetching "+sym+" (up to "+deepBarsN+" bars)…";
+    getKlinesDeep(sym, deepBarsN, function(c){
+      statusEl.textContent="Deep-fetching "+sym+" … "+c+" bars";
+    }).then(function(candles){
+      if(!candles || !candles.length){
+        statusEl.textContent="No data. "+(lastErr||"Check the symbol.");
+        setBusy(false); deepBtn.disabled=false; return;
+      }
+      // trim to requested size, dedupe by time just in case
+      var seen={}, clean=[];
+      candles.forEach(function(k){ if(!seen[k.t]){seen[k.t]=1;clean.push(k);} });
+      clean.sort(function(a,b){return a.t-b.t;});
+      cache={}; cache[sym]=clean;
+      deepMode=true;
+      deepSpanMs = clean[clean.length-1].t - clean[0].t;
+      recompute();
+      var days=(deepSpanMs/86400000).toFixed(1);
+      statusEl.textContent="Backtested "+sym+" · "+clean.length+" bars ("+days+" days) · "+allHits.length+" signals.";
+      setBusy(false); deepBtn.disabled=false;
+    });
+  };
+  deepSymEl.addEventListener("keydown",function(e){if(e.key==="Enter")deepBtn.click();});
 })();
 </script>
 </body>
