@@ -146,10 +146,14 @@
 
     <div class="card">
       <h2>Parameters</h2>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button class="btn dir-btn" id="dirLong" data-dir="long" style="flex:1">▲ LONG (bottoms)</button>
+        <button class="btn ghost dir-btn" id="dirShort" data-dir="short" style="flex:1">▼ SHORT (tops)</button>
+      </div>
       <div class="param">
         <label>① RSI threshold <b id="v_rsi">33</b></label>
         <input type="range" id="p_rsi" min="10" max="45" step="1" value="33">
-        <div class="hint">bar's RSI must be below this (over-sold)</div>
+        <div class="hint" id="rsiHint">bar's RSI must be below this (over-sold)</div>
       </div>
       <div class="param">
         <label>② Min drop % <b id="v_drop">1.5</b></label>
@@ -273,6 +277,7 @@
 
   // ── config ──
   var CFG = {
+    dir:"long",
     rsiLen:14, leftBars:5, rightBars:3, lowWin:150, dropWin:24, emaLen:50,
     rsiThr:33, dropPct:1.5, bounceAtr:0.5,
     useTrend:false, maxBelow:3.0,
@@ -327,6 +332,12 @@
     for(var j=idx-left;j<=idx+right;j++){if(j===idx)continue;if(lows[j]<v)return false;}
     return true;
   }
+  function isPivotHigh(highs,idx,left,right){
+    if(idx-left<0||idx+right>=highs.length)return false;
+    var v=highs[idx];
+    for(var j=idx-left;j<=idx+right;j++){if(j===idx)continue;if(highs[j]>v)return false;}
+    return true;
+  }
   function highestIn(arr,endIdx,win){var s=Math.max(0,endIdx-win+1),m=-Infinity;
     for(var i=s;i<=endIdx;i++)if(arr[i]>m)m=arr[i];return m;}
   function lowestIn(arr,endIdx,win){var s=Math.max(0,endIdx-win+1),m=Infinity;
@@ -347,52 +358,80 @@
     var ema=emaSeries(closes,CFG.emaLen);
 
     // walk pivots: pivot bar p is confirmed rightBars later
+    var isShort = CFG.dir==="short";
     for(var p=CFG.leftBars; p<n-CFG.rightBars; p++){
-      if(!isPivotLow(lows,p,CFG.leftBars,CFG.rightBars)) continue;
-      var pLow=lows[p], pRsi=rsi[p];
-      if(pRsi===null) continue;
-      if(pLow!==lowestIn(lows,p,CFG.lowWin)) continue;
-      var recentHigh=highestIn(highs,p,CFG.dropWin);
-      var dropVal=(recentHigh-pLow)/recentHigh*100;
+      var pRef, pRsi=rsi[p], dropVal, bounceVal, belowPct, wickR, closePos;
+      var atrP=atr[p]; if(pRsi===null || !atrP) continue;
 
-      // FIXED bounce: max high over the rightBars bars AFTER the pivot low
-      var bEnd=Math.min(n-1,p+CFG.rightBars);
-      var bounceHigh=highestIn(highs,bEnd,CFG.rightBars);
-      var atrP=atr[p];
-      if(!atrP) continue;
-      var bounceVal=(bounceHigh-pLow)/atrP;
+      if(!isShort){
+        // ── LONG: bottom ──
+        if(!isPivotLow(lows,p,CFG.leftBars,CFG.rightBars)) continue;
+        pRef=lows[p];
+        if(pRef!==lowestIn(lows,p,CFG.lowWin)) continue;
+        var recentHigh=highestIn(highs,p,CFG.dropWin);
+        dropVal=(recentHigh-pRef)/recentHigh*100;             // fall into the low
+        var bEndL=Math.min(n-1,p+CFG.rightBars);
+        var bounceHigh=highestIn(highs,bEndL,CFG.rightBars);
+        bounceVal=(bounceHigh-pRef)/atrP;                     // rebound up
+        var emaPL=ema[p];
+        belowPct=emaPL? (emaPL-pRef)/emaPL*100 : 0;           // how far below EMA
+        var rngL=highs[p]-pRef;
+        var lowerWick=Math.min(closes[p],opens[p])-pRef;
+        var bodyL=Math.abs(closes[p]-opens[p]);
+        wickR=bodyL>0? lowerWick/bodyL : (lowerWick>0?9:0);
+        closePos=rngL>0? (closes[p]-pRef)/rngL : 0;
+        if(!(pRsi<CFG.rsiThr && dropVal>=CFG.dropPct && bounceVal>=CFG.bounceAtr)) continue;
+        if(CFG.useTrend && !(belowPct<=CFG.maxBelow || dropVal>=CFG.dropPct*3)) continue;
+        if(CFG.useWick && !(wickR>=CFG.wickRatio && closePos>=0.4)) continue;
+      } else {
+        // ── SHORT: top (mirror) ──
+        if(!isPivotHigh(highs,p,CFG.leftBars,CFG.rightBars)) continue;
+        pRef=highs[p];
+        if(pRef!==highestIn(highs,p,CFG.lowWin)) continue;    // real high over window
+        var recentLow=lowestIn(lows,p,CFG.dropWin);
+        dropVal=(pRef-recentLow)/recentLow*100;               // RISE into the high
+        var bEndS=Math.min(n-1,p+CFG.rightBars);
+        var bounceLow=lowestIn(lows,bEndS,CFG.rightBars);
+        bounceVal=(pRef-bounceLow)/atrP;                      // pullback down
+        var emaPS=ema[p];
+        belowPct=emaPS? (pRef-emaPS)/emaPS*100 : 0;           // how far ABOVE EMA
+        var rngS=pRef-lows[p];
+        var upperWick=pRef-Math.max(closes[p],opens[p]);
+        var bodyS=Math.abs(closes[p]-opens[p]);
+        wickR=bodyS>0? upperWick/bodyS : (upperWick>0?9:0);   // upper wick
+        closePos=rngS>0? (pRef-closes[p])/rngS : 0;           // close near high = high pos
+        // overbought: RSI ABOVE (100 - rsiThr)  e.g. rsiThr 30 -> overbought >70
+        var obThr=100-CFG.rsiThr;
+        if(!(pRsi>obThr && dropVal>=CFG.dropPct && bounceVal>=CFG.bounceAtr)) continue;
+        if(CFG.useTrend && !(belowPct<=CFG.maxBelow || dropVal>=CFG.dropPct*3)) continue;
+        if(CFG.useWick && !(wickR>=CFG.wickRatio && closePos>=0.4)) continue;
+      }
 
-      // EMA gap
-      var emaP=ema[p];
-      var belowPct=emaP? (emaP-pLow)/emaP*100 : 0;
-      // candle shape
-      var rng=highs[p]-pLow;
-      var lowerWick=Math.min(closes[p],opens[p])-pLow;
-      var body=Math.abs(closes[p]-opens[p]);
-      var wickR=body>0? lowerWick/body : (lowerWick>0?9:0);
-      var closePos=rng>0? (closes[p]-pLow)/rng : 0;
-
-      // apply active filters
-      if(!(pRsi<CFG.rsiThr && dropVal>=CFG.dropPct && bounceVal>=CFG.bounceAtr)) continue;
-      if(CFG.useTrend && !(belowPct<=CFG.maxBelow || dropVal>=CFG.dropPct*3)) continue;
-      if(CFG.useWick && !(wickR>=CFG.wickRatio && closePos>=0.4)) continue;
-
-      // forward path: for each future bar record %high and %low vs pivot low,
-      // so we can replay "did target (+X%) or stop (-Y%) come first" for any rule.
-      var WINMAX=36; // 3h at 5m
+      // forward path: P&L vs pRef. For long, profit when price rises; for short, when it falls.
+      // We store hi/lo/cl as "profit %" in the trade's direction so the verdict logic is identical.
+      var WINMAX=36;
       var fpath=[];
       for(var f=1; f<=WINMAX; f++){
         var fi=p+f;
         if(fi>=n){ fpath.push(null); continue; }
-        fpath.push({
-          hi:+((highs[fi]-pLow)/pLow*100).toFixed(2),
-          lo:+((lows[fi]-pLow)/pLow*100).toFixed(2),
-          cl:+((closes[fi]-pLow)/pLow*100).toFixed(2)
-        });
+        if(!isShort){
+          fpath.push({
+            hi:+((highs[fi]-pRef)/pRef*100).toFixed(2),   // best up-move = profit
+            lo:+((lows[fi]-pRef)/pRef*100).toFixed(2),    // worst down-move = against
+            cl:+((closes[fi]-pRef)/pRef*100).toFixed(2)
+          });
+        } else {
+          // short: profit when price falls below pRef → flip sign
+          fpath.push({
+            hi:+((pRef-lows[fi])/pRef*100).toFixed(2),    // best down-move = profit
+            lo:+((pRef-highs[fi])/pRef*100).toFixed(2),   // worst up-move = against
+            cl:+((pRef-closes[fi])/pRef*100).toFixed(2)
+          });
+        }
       }
 
       hits.push({
-        sym:sym, t:times[p], price:pLow,
+        sym:sym, t:times[p], price:pRef,
         rsi:Math.round(pRsi), drop:+dropVal.toFixed(1), bounce:+bounceVal.toFixed(1),
         ema:+belowPct.toFixed(1), wick:+wickR.toFixed(1), close:+closePos.toFixed(2),
         fpath:fpath
@@ -479,6 +518,19 @@
   }
   bindSlider("p_rsi","v_rsi","rsiThr");
   bindSlider("p_drop","v_drop","dropPct",function(x){return parseFloat(x).toFixed(1);});
+
+  // long / short toggle
+  function setDir(dir){
+    CFG.dir=dir;
+    var L=$("dirLong"), S=$("dirShort");
+    if(dir==="long"){ L.className="btn dir-btn"; S.className="btn ghost dir-btn";
+      $("rsiHint").textContent="bar's RSI must be below this (over-sold)"; }
+    else { S.className="btn dir-btn"; L.className="btn ghost dir-btn";
+      $("rsiHint").textContent="mirrored: RSI must be ABOVE "+(100-CFG.rsiThr)+" (over-bought)"; }
+    recompute();
+  }
+  $("dirLong").onclick=function(){setDir("long");};
+  $("dirShort").onclick=function(){setDir("short");};
   bindSlider("p_bounce","v_bounce","bounceAtr",function(x){return parseFloat(x).toFixed(1);});
   bindSlider("p_right","v_right","rightBars");
   bindSlider("p_winpct","v_winpct","winPct",function(x){return parseFloat(x).toFixed(1);});
