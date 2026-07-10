@@ -132,7 +132,8 @@
       </div>
       <div class="presets" id="presets"></div>
       <div style="margin-top:12px">
-        <button class="btn ghost" id="topBtn" style="width:100%">Scan top 40 by volume</button>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-bottom:6px">or scan top coins by volume:</div>
+        <div class="presets" id="topBtns"></div>
       </div>
     </div>
 
@@ -356,9 +357,9 @@
 
   // ── DOM ──
   var $=function(id){return document.getElementById(id);};
-  var symInput=$("symInput"), scanBtn=$("scanBtn"), topBtn=$("topBtn"),
+  var symInput=$("symInput"), scanBtn=$("scanBtn"),
       statusEl=$("status"), rowsEl=$("rows"), summaryEl=$("summary"),
-      presetsEl=$("presets"), statsNote=$("statsNote");
+      presetsEl=$("presets"), statsNote=$("statsNote"), topBtnsEl=$("topBtns");
 
   PRESETS.forEach(function(p){
     var c=document.createElement("span"); c.className="chip"; c.textContent=p;
@@ -477,10 +478,15 @@
 
   function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
 
+  function setBusy(b){
+    scanBtn.disabled=b;
+    Array.prototype.forEach.call(topBtnsEl.children,function(c){ c.style.pointerEvents=b?"none":"auto"; c.style.opacity=b?"0.4":"1"; });
+  }
+
   function scanSymbols(syms){
-    scanBtn.disabled=true; topBtn.disabled=true;
-    var done=0;
-    statusEl.textContent="Fetching "+syms.length+" pair(s)…";
+    setBusy(true);
+    var done=0, total=syms.length;
+    statusEl.textContent="Fetching "+total+" pair(s)…";
     return (function loop(i){
       if(i>=syms.length) return Promise.resolve();
       var batch=syms.slice(i,i+BATCH);
@@ -488,7 +494,8 @@
         return getKlines(sym).then(function(candles){
           done++;
           if(candles && candles.length) cache[sym]=candles;
-          statusEl.textContent="Fetched "+done+" / "+syms.length+" …";
+          var pct=Math.round(done/total*100);
+          statusEl.textContent="Fetching "+done+" / "+total+"  ("+pct+"%) …";
         });
       })).then(function(){ return sleep(BATCH_PAUSE).then(function(){return loop(i+BATCH);}); });
     })(0).then(function(){
@@ -499,7 +506,7 @@
       } else {
         statusEl.textContent="Scanned "+loaded+" coin(s) · "+allHits.length+" signals. Adjust sliders to re-filter (no re-fetch).";
       }
-      scanBtn.disabled=false; topBtn.disabled=false;
+      setBusy(false);
     });
   }
 
@@ -516,16 +523,22 @@
   };
   symInput.addEventListener("keydown",function(e){if(e.key==="Enter")scanBtn.click();});
 
-  topBtn.onclick=function(){
-    scanBtn.disabled=true; topBtn.disabled=true;
-    statusEl.textContent="Loading top symbols by volume…";
-    getTopSymbols(40).then(function(syms){
-      cache={}; scanSymbols(syms);
-    }).catch(function(){
-      statusEl.textContent="Couldn't load symbol list. Check network / CORS.";
-      scanBtn.disabled=false; topBtn.disabled=false;
-    });
-  };
+  // top-N buttons
+  [40,100,200,400].forEach(function(n){
+    var b=document.createElement("span");
+    b.className="chip"; b.textContent="top "+n;
+    b.onclick=function(){
+      setBusy(true);
+      statusEl.textContent="Loading top "+n+" symbols by volume…";
+      getTopSymbols(n).then(function(syms){
+        cache={}; scanSymbols(syms);
+      }).catch(function(){
+        statusEl.textContent="Couldn't load symbol list. Check network / CORS.";
+        setBusy(false);
+      });
+    };
+    topBtnsEl.appendChild(b);
+  });
 })();
 </script>
 </body>
