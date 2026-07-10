@@ -566,12 +566,18 @@
 
     var arr=allHits.slice();
     // Multi-coin: drop stale signals from dead/illiquid coins whose 500-bar window
-    // reaches back weeks/months. Keep only the recent window so table matches the curve.
+    // reaches back weeks/months. Filter against wall-clock NOW (not newest signal),
+    // so a batch of old coins can't drag the cutoff back with them.
     if(!deepMode && arr.length){
-      var newestT=Math.max.apply(null, arr.map(function(h){return h.t;}));
-      var freshCut=newestT - 3*86400000;
+      var freshCut=Date.now() - 3*86400000;
       var fresh=arr.filter(function(h){return h.t>=freshCut;});
-      if(fresh.length>=2) arr=fresh;
+      arr = fresh; // if nothing is fresh, show empty rather than stale data
+    }
+    if(!arr.length){
+      rowsEl.innerHTML='<tr><td class="empty" colspan="11">No recent signals (last 3 days). Try a fresh scan or loosen a slider.</td></tr>';
+      summaryEl.innerHTML=""; statsNote.style.display="none";
+      $("equityWrap").style.display="none";
+      return;
     }
     arr.sort(function(a,b){
       if(key==="sym") return dir*(a.sym<b.sym?-1:a.sym>b.sym?1:0);
