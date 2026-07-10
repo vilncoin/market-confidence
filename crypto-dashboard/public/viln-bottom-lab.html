@@ -127,7 +127,7 @@
     <div class="card">
       <h2>Scan</h2>
       <div class="scan-row">
-        <input id="symInput" placeholder="ESPORTS, KAT, RIF …" spellcheck="false">
+        <input id="symInput" placeholder="BTC, SOL, PEPE …" spellcheck="false">
         <button class="btn" id="scanBtn">Scan</button>
       </div>
       <div class="presets" id="presets"></div>
@@ -214,7 +214,7 @@
   // data-api.binance.vision = Binance public market-data mirror with CORS enabled
   // (api.binance.com blocks browser calls). Same endpoints, no auth.
   var API="https://data-api.binance.vision";
-  var PRESETS=["ESPORTS","KAT","RIF","TWT","BTC","ETH","SOL","DOGE"];
+  var PRESETS=["BTC","ETH","SOL","BNB","XRP","DOGE","PEPE","WIF"];
 
   // ── indicators (from WhaleHunter, verified) ──
   function rsiSeries(closes,len){
@@ -326,7 +326,7 @@
   function getKlines(sym){
     var url=API+"/api/v3/klines?symbol="+sym+"&interval="+TF+"&limit="+KLIMIT;
     return fetch(url).then(function(r){
-        if(!r.ok){ lastErr=sym+": HTTP "+r.status; return null; }
+        if(!r.ok){ lastErr=sym+(r.status===400?" — not a Binance pair (400)":" HTTP "+r.status); return null; }
         return r.json();
       })
       .then(function(rows){
