@@ -485,7 +485,13 @@
   function fmtAgo(t){
     var m=Math.round((Date.now()-t)/60000);
     if(m<60)return m+"m ago";
-    var h=Math.floor(m/60); return h+"h"+(m%60?(" "+(m%60)+"m"):"")+" ago";
+    var h=Math.floor(m/60);
+    if(h<48) return h+"h ago";
+    var d=Math.floor(h/24);
+    if(d<14) return d+"d ago";
+    var w=Math.floor(d/7);
+    if(w<9) return w+"w ago";
+    return Math.floor(d/30)+"mo ago";
   }
   function fmtPrice(p){
     if(p>=1)return p.toFixed(3);
