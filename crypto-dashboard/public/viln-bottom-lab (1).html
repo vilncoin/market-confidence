@@ -203,6 +203,19 @@
         <div class="hint">Wins average $894K of dollar volume; losses average $2.7M — a 3× gap, the strongest signal in the data. Thin coins snap back violently; heavyweights absorb the flush and keep bleeding.</div>
       </div>
 
+      <label class="toggle-row"><input type="checkbox" id="p_useAbsorb"> ⑪ Absorption filter — volume that didn't move price</label>
+      <div class="param" id="absorbBox" style="display:none">
+        <label>&nbsp;&nbsp;&nbsp;min absorb (vol-surge ÷ range%) <b id="v_absorb">3.0</b></label>
+        <input type="range" id="p_absorb" min="0.5" max="20" step="0.5" value="3.0">
+        <div class="hint">A whale eating the dump: huge volume, small price move. This is what accumulation actually looks like on the tape.</div>
+      </div>
+      <label class="toggle-row"><input type="checkbox" id="p_useBig"> ⑫ Big-order filter — order SIZE surged</label>
+      <div class="param" id="bigBox" style="display:none">
+        <label>&nbsp;&nbsp;&nbsp;min avg-trade-size vs norm <b id="v_big">1.2</b></label>
+        <input type="range" id="p_big" min="0.5" max="5" step="0.1" value="1.2">
+        <div class="hint">&gt;1 means the average order got BIGGER at the low — institutions stepping in, not a thousand retail panic-sells.</div>
+      </div>
+
       <label class="toggle-row" style="margin-top:12px"><input type="checkbox" id="p_usePos"> ⑩ Load POSITION data <b style="color:var(--amber)">◆ slow but this is the real hidden data</b></label>
       <div class="hint" style="margin:-8px 0 0 24px;font-size:11px">
         Open Interest, whale long/short ratio (top 20% by margin), and retail long/short ratio.
@@ -315,6 +328,8 @@
     useVol:false, volMin:1.0,
     useQvol:false, qvolMax:1000000,
     usePos:false,
+    useAbsorb:false, absorbMin:3.0,
+    useBig:false, bigMin:1.2,
     winPct:1.8, winBars:6, stopPct:0.8, feePct:0.1,
     posPct:10, maxPos:10, leverage:1
   };
@@ -512,6 +527,22 @@
         }
       }
 
+      // ── ABSORPTION: volume that did NOT move price = someone is eating the flow ──
+      // Big volume + small price move = a whale absorbing the dump (accumulation).
+      // Big volume + big price move  = just panic selling (falling knife).
+      var barRange = highs[p]>0 ? (highs[p]-lows[p])/highs[p]*100 : 0;   // bar's % range
+      var absorb   = barRange>0.01 ? _vSurge/barRange : 0;               // vol surge per % of movement
+      // avg trade SIZE vs its own 20-bar norm. Big orders (not many small ones) = institutional.
+      var avgTradeSize = trades[p]>0 ? qvols[p]/trades[p] : 0;
+      var avgTS20 = 0, cTS=0;
+      for(var z=Math.max(0,p-20); z<p; z++){
+        if(trades[z]>0){ avgTS20 += qvols[z]/trades[z]; cTS++; }
+      }
+      avgTS20 = cTS? avgTS20/cTS : 0;
+      var bigTrade = avgTS20>0 ? avgTradeSize/avgTS20 : 0;   // >1 = orders got BIGGER
+      // effort vs result: dollars spent per 1% of price movement
+      var effort = barRange>0.01 ? qvols[p]/barRange : 0;
+
       // ── NEW: order-flow metrics that almost nobody looks at ──
       // Vsurge = pivot-bar volume vs the 20-bar average before it (1.0 = normal, 3.0 = 3x spike)
       // Taker  = share of volume that was AGGRESSIVE BUYING (0.5 = balanced, >0.5 = buyers lifting offers)
@@ -524,12 +555,18 @@
       var takerRatio = vols[p]>0 ? takerB[p]/vols[p] : 0.5;
       var qVol = qvols[p];
 
+      // absorption / big-order filters (computed above)
+      if(CFG.useAbsorb && absorb < CFG.absorbMin) continue;
+      if(CFG.useBig    && bigTrade < CFG.bigMin) continue;
+
       hits.push({
         sym:sym, t:times[p], price:entry,
         rsi:Math.round(pRsi), drop:+dropVal.toFixed(1), bounce:+bounceVal.toFixed(1),
         ema:+belowPct.toFixed(1), wick:+wickR.toFixed(1), close:+closePos.toFixed(2),
         vsurge:+vSurge.toFixed(2), taker:+takerRatio.toFixed(2),
         nsurge:+nSurge.toFixed(2), qvol:Math.round(qVol),
+        absorb:+absorb.toFixed(2), bigtrade:+bigTrade.toFixed(2),
+        range:+barRange.toFixed(2), effort:Math.round(effort),
         fpath:fpath
       });
     }
@@ -734,6 +771,14 @@
   });
   $("p_useQvol").addEventListener("change",function(){
     CFG.useQvol=this.checked; $("qvolBox").style.display=this.checked?"block":"none"; recompute();
+  });
+  bindSlider("p_absorb","v_absorb","absorbMin",function(x){return parseFloat(x).toFixed(1);});
+  bindSlider("p_big","v_big","bigMin",function(x){return parseFloat(x).toFixed(1);});
+  $("p_useAbsorb").addEventListener("change",function(){
+    CFG.useAbsorb=this.checked; $("absorbBox").style.display=this.checked?"block":"none"; recompute();
+  });
+  $("p_useBig").addEventListener("change",function(){
+    CFG.useBig=this.checked; $("bigBox").style.display=this.checked?"block":"none"; recompute();
   });
   $("p_usePos").addEventListener("change",function(){
     CFG.usePos=this.checked;
@@ -953,6 +998,16 @@
       'Nsurge = trade-count spike · $vol = dollar volume on that bar</span><br><br>'+
       '<span style="color:var(--signal)">WIN&nbsp;&nbsp;</span> Vsurge <b>'+avgOf(W,"vsurge")+'</b> · Taker <b>'+avgOf2(W,"taker")+'</b> · Nsurge <b>'+avgOf(W,"nsurge")+'</b> · $vol <b>'+fmtBig(avgRaw(W,"qvol"))+'</b><br>'+
       '<span style="color:var(--down)">LOSS</span> Vsurge <b>'+avgOf(L,"vsurge")+'</b> · Taker <b>'+avgOf2(L,"taker")+'</b> · Nsurge <b>'+avgOf(L,"nsurge")+'</b> · $vol <b>'+fmtBig(avgRaw(L,"qvol"))+'</b>'+
+      '</div>'+
+      '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">'+
+      '<b style="color:var(--signal)">◆ ABSORPTION</b> — volume that did NOT move price = someone is eating the flow:<br>'+
+      '<span style="color:var(--ink-faint)">'+
+      'Absorb = volume-surge ÷ bar range% (<b>high = huge volume, tiny price move = a whale is soaking up the dump</b>) · '+
+      'BigTrade = avg trade SIZE vs its own norm (<b>&gt;1 = orders got bigger — institutions, not panicking retail</b>) · '+
+      'Range = the bar\'s high-low as % · Effort = $ spent per 1% of movement'+
+      '</span><br><br>'+
+      '<span style="color:var(--signal)">WIN&nbsp;&nbsp;</span> Absorb <b>'+avgOf(W,"absorb")+'</b> · BigTrade <b>'+avgOf2(W,"bigtrade")+'</b> · Range <b>'+avgOf(W,"range")+'%</b> · Effort <b>'+fmtBig(avgRaw(W,"effort"))+'</b><br>'+
+      '<span style="color:var(--down)">LOSS</span> Absorb <b>'+avgOf(L,"absorb")+'</b> · BigTrade <b>'+avgOf2(L,"bigtrade")+'</b> · Range <b>'+avgOf(L,"range")+'%</b> · Effort <b>'+fmtBig(avgRaw(L,"effort"))+'</b>'+
       '</div>' + posBlock(W,L);
 
     renderEquity(judged);
