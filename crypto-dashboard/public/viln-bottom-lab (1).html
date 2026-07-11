@@ -184,17 +184,23 @@
 
       <div style="border-top:1px solid var(--line);margin:14px 0 12px"></div>
       <h2 style="margin-bottom:6px;color:var(--hunt-hi)">◆ Order flow (the hidden edge)</h2>
-      <label class="toggle-row"><input type="checkbox" id="p_useTaker"> ⑦ Taker filter — require aggressive BUYING at the low</label>
+      <label class="toggle-row"><input type="checkbox" id="p_useTaker"> ⑦ Capitulation filter — require SELLING to dominate the low</label>
       <div class="param" id="takerBox" style="display:none">
-        <label>&nbsp;&nbsp;&nbsp;min taker-buy share <b id="v_taker">0.50</b></label>
-        <input type="range" id="p_taker" min="0.3" max="0.8" step="0.01" value="0.50">
-        <div class="hint">0.5 = balanced. Above 0.5 means buyers were lifting the offer while price fell — real absorption, not a falling knife. (For SHORT this flips: it requires aggressive SELLING.)</div>
+        <label>&nbsp;&nbsp;&nbsp;max taker-buy share <b id="v_taker">0.42</b></label>
+        <input type="range" id="p_taker" min="0.30" max="0.55" step="0.01" value="0.42">
+        <div class="hint">Data says WINS have LOWER buy-share (0.37) than losses. A low number = sellers dumping = capitulation = everyone who wanted out is out. (SHORT mirrors: requires buying to dominate the high.)</div>
       </div>
       <label class="toggle-row"><input type="checkbox" id="p_useVol"> ⑧ Volume-surge filter — require a volume spike</label>
       <div class="param" id="volBox" style="display:none">
-        <label>&nbsp;&nbsp;&nbsp;min volume vs 20-bar avg <b id="v_vol">1.0</b></label>
-        <input type="range" id="p_vol" min="0.5" max="6" step="0.1" value="1.0">
-        <div class="hint">Capitulation bottoms usually print on heavy volume. 1.0 = average, 3.0 = 3× spike.</div>
+        <label>&nbsp;&nbsp;&nbsp;min volume vs 20-bar avg <b id="v_vol">5.0</b></label>
+        <input type="range" id="p_vol" min="0.5" max="20" step="0.5" value="5.0">
+        <div class="hint">Capitulation prints on heavy volume. 1.0 = average, 5.0 = 5× spike.</div>
+      </div>
+      <label class="toggle-row"><input type="checkbox" id="p_useQvol"> ⑨ Size filter — SMALL coins only <b style="color:var(--signal)">★ biggest edge</b></label>
+      <div class="param" id="qvolBox" style="display:none">
+        <label>&nbsp;&nbsp;&nbsp;max $ volume on the bar <b id="v_qvol">$1.0M</b></label>
+        <input type="range" id="p_qvol" min="50000" max="10000000" step="50000" value="1000000">
+        <div class="hint">Wins average $894K of dollar volume; losses average $2.7M — a 3× gap, the strongest signal in the data. Thin coins snap back violently; heavyweights absorb the flush and keep bleeding.</div>
       </div>
 
       <div style="border-top:1px solid var(--line);margin:14px 0 12px"></div>
@@ -298,8 +304,9 @@
     rsiThr:33, dropPct:1.5, bounceAtr:0.5,
     useTrend:false, maxBelow:3.0,
     useWick:false, wickRatio:1.0,
-    useTaker:false, takerMin:0.50,
+    useTaker:false, takerMax:0.42,
     useVol:false, volMin:1.0,
+    useQvol:false, qvolMax:1000000,
     winPct:1.8, winBars:6, stopPct:0.8, feePct:0.1,
     posPct:10, maxPos:10, leverage:1
   };
@@ -454,13 +461,14 @@
       var _vSurge = _avgV>0 ? vols[p]/_avgV : 0;
       var _taker  = vols[p]>0 ? takerB[p]/vols[p] : 0.5;
       if(CFG.useVol && _vSurge < CFG.volMin) continue;
+      if(CFG.useQvol && qvols[p] > CFG.qvolMax) continue;   // SMALL coins only
       if(CFG.useTaker){
         if(!isShort){
-          // LONG: want AGGRESSIVE BUYING at the low (absorption)
-          if(_taker < CFG.takerMin) continue;
+          // LONG: capitulation = SELLERS dominate the low. taker-buy share must be LOW.
+          if(_taker > CFG.takerMax) continue;
         } else {
-          // SHORT: mirror — want AGGRESSIVE SELLING at the high
-          if((1-_taker) < CFG.takerMin) continue;
+          // SHORT: mirror — BUYERS dominate the high (euphoria). buy-share must be HIGH.
+          if((1-_taker) > CFG.takerMax) continue;
         }
       }
 
@@ -656,13 +664,25 @@
   $("p_useWick").addEventListener("change",function(){
     CFG.useWick=this.checked; $("wickBox").style.display=this.checked?"block":"none"; recompute();
   });
-  bindSlider("p_taker","v_taker","takerMin",function(x){return parseFloat(x).toFixed(2);});
+  bindSlider("p_taker","v_taker","takerMax",function(x){return parseFloat(x).toFixed(2);});
   bindSlider("p_vol","v_vol","volMin",function(x){return parseFloat(x).toFixed(1);});
+  (function(){
+    var el=$("p_qvol"), v=$("v_qvol");
+    el.addEventListener("input",function(){
+      CFG.qvolMax=parseFloat(el.value);
+      var m=CFG.qvolMax;
+      v.textContent = m>=1e6 ? ("$"+(m/1e6).toFixed(1)+"M") : ("$"+Math.round(m/1e3)+"K");
+      recompute();
+    });
+  })();
   $("p_useTaker").addEventListener("change",function(){
     CFG.useTaker=this.checked; $("takerBox").style.display=this.checked?"block":"none"; recompute();
   });
   $("p_useVol").addEventListener("change",function(){
     CFG.useVol=this.checked; $("volBox").style.display=this.checked?"block":"none"; recompute();
+  });
+  $("p_useQvol").addEventListener("change",function(){
+    CFG.useQvol=this.checked; $("qvolBox").style.display=this.checked?"block":"none"; recompute();
   });
 
   function fmtAgo(t){
