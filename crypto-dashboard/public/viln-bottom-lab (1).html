@@ -203,6 +203,13 @@
         <div class="hint">Wins average $894K of dollar volume; losses average $2.7M — a 3× gap, the strongest signal in the data. Thin coins snap back violently; heavyweights absorb the flush and keep bleeding.</div>
       </div>
 
+      <label class="toggle-row" style="margin-top:12px"><input type="checkbox" id="p_usePos"> ⑩ Load POSITION data <b style="color:var(--amber)">◆ slow but this is the real hidden data</b></label>
+      <div class="hint" style="margin:-8px 0 0 24px;font-size:11px">
+        Open Interest, whale long/short ratio (top 20% by margin), and retail long/short ratio.
+        These are <b>not price-derived</b> — they show what traders are actually holding.
+        Adds ~3 requests per coin, so scan 40–100 coins, not 400.
+      </div>
+
       <div style="border-top:1px solid var(--line);margin:14px 0 12px"></div>
       <h2 style="margin-bottom:12px">Win rule</h2>
       <div class="param">
@@ -307,6 +314,7 @@
     useTaker:false, takerMax:0.42,
     useVol:false, volMin:1.0,
     useQvol:false, qvolMax:1000000,
+    usePos:false,
     winPct:1.8, winBars:6, stopPct:0.8, feePct:0.1,
     posPct:10, maxPos:10, leverage:1
   };
@@ -583,6 +591,49 @@
     return attempt(0);
   }
 
+  // ── POSITION DATA (the real hidden edge) ──
+  // These are NOT price-derived. They show what traders are actually DOING.
+  //   OI      = open interest (how many contracts are open)
+  //   whale   = long/short ratio of TOP traders (top 20% by margin balance)
+  //   retail  = long/short ratio of ALL accounts (the crowd)
+  // The gap between whale and retail is where the money is.
+  var posCache = {};   // sym -> {oi:[], whale:[], retail:[]}
+
+  function fetchPosData(sym){
+    if(posCache[sym]) return Promise.resolve(posCache[sym]);
+    var per = "5m", lim = 500;
+    function grab(path){
+      return fetch(futURL(path+"?symbol="+sym+"&period="+per+"&limit="+lim))
+        .then(function(r){ return r.ok? r.json() : []; })
+        .catch(function(){ return []; });
+    }
+    return Promise.all([
+      grab("/futures/data/openInterestHist"),
+      grab("/futures/data/topLongShortPositionRatio"),
+      grab("/futures/data/globalLongShortAccountRatio")
+    ]).then(function(res){
+      var d = {
+        oi:     Array.isArray(res[0])? res[0] : [],
+        whale:  Array.isArray(res[1])? res[1] : [],
+        retail: Array.isArray(res[2])? res[2] : []
+      };
+      posCache[sym] = d;
+      return d;
+    });
+  }
+
+  // find the record nearest to a timestamp
+  function nearest(arr, ts, tkey){
+    if(!arr || !arr.length) return null;
+    var best=null, bd=Infinity;
+    for(var i=0;i<arr.length;i++){
+      var t = +arr[i][tkey||"timestamp"];
+      var d = Math.abs(t-ts);
+      if(d<bd){ bd=d; best=arr[i]; }
+    }
+    return bd <= 10*60*1000 ? best : null;   // within 10 min
+  }
+
   function getTopSymbols(limit){
     return tryProxies("/fapi/v1/ticker/24hr")
       .then(function(arr){
@@ -684,6 +735,10 @@
   $("p_useQvol").addEventListener("change",function(){
     CFG.useQvol=this.checked; $("qvolBox").style.display=this.checked?"block":"none"; recompute();
   });
+  $("p_usePos").addEventListener("change",function(){
+    CFG.usePos=this.checked;
+    if(this.checked) attachPosData(); else render();
+  });
 
   function fmtAgo(t){
     var m=Math.round((Date.now()-t)/60000);
@@ -707,7 +762,54 @@
     Object.keys(cache).forEach(function(sym){
       allHits=allHits.concat(scanHistory(sym,cache[sym]));
     });
+    attachPosData();   // fills OI / whale / retail on each hit (async, re-renders when done)
     render();
+  }
+
+  // Attach position metrics to hits. Runs async; re-renders when finished.
+  var posLoading=false;
+  function attachPosData(){
+    if(!CFG.usePos || posLoading) return;
+    var syms = Object.keys(cache);
+    if(!syms.length) return;
+    posLoading = true;
+    statusEl.textContent = "Loading position data (OI / whale / retail) for "+syms.length+" coins…";
+    var i=0;
+    function step(){
+      if(i>=syms.length){
+        posLoading=false;
+        statusEl.textContent = "Position data loaded · "+allHits.length+" signals.";
+        render();
+        return;
+      }
+      var batch = syms.slice(i, i+4);
+      i += 4;
+      Promise.all(batch.map(fetchPosData)).then(function(){
+        return sleep(150);
+      }).then(step);
+    }
+    step();
+  }
+
+  // compute OI-change / whale / retail for one hit, from cached position data
+  function posMetrics(h){
+    var d = posCache[h.sym];
+    if(!d) return null;
+    var ts = h.t;
+    var oiNow  = nearest(d.oi, ts);
+    var oiPrev = nearest(d.oi, ts - 30*60*1000);   // 30 min earlier
+    var wh     = nearest(d.whale, ts);
+    var rt     = nearest(d.retail, ts);
+    var oiChg = null;
+    if(oiNow && oiPrev){
+      var a=parseFloat(oiNow.sumOpenInterest), b=parseFloat(oiPrev.sumOpenInterest);
+      if(b>0) oiChg = (a-b)/b*100;
+    }
+    return {
+      oiChg: oiChg,
+      whale: wh? parseFloat(wh.longShortRatio) : null,
+      retail: rt? parseFloat(rt.longShortRatio) : null
+    };
   }
 
   // verdict: replay forward path bar-by-bar. Whichever of target(+winPct) / stop(-stopPct)
@@ -851,9 +953,39 @@
       'Nsurge = trade-count spike · $vol = dollar volume on that bar</span><br><br>'+
       '<span style="color:var(--signal)">WIN&nbsp;&nbsp;</span> Vsurge <b>'+avgOf(W,"vsurge")+'</b> · Taker <b>'+avgOf2(W,"taker")+'</b> · Nsurge <b>'+avgOf(W,"nsurge")+'</b> · $vol <b>'+fmtBig(avgRaw(W,"qvol"))+'</b><br>'+
       '<span style="color:var(--down)">LOSS</span> Vsurge <b>'+avgOf(L,"vsurge")+'</b> · Taker <b>'+avgOf2(L,"taker")+'</b> · Nsurge <b>'+avgOf(L,"nsurge")+'</b> · $vol <b>'+fmtBig(avgRaw(L,"qvol"))+'</b>'+
-      '</div>';
+      '</div>' + posBlock(W,L);
 
     renderEquity(judged);
+  }
+
+  // ── POSITION DATA comparison (OI / whale / retail) ──
+  function posBlock(W,L){
+    if(!CFG.usePos) return "";
+    function agg(list){
+      var oi=[], wh=[], rt=[], gap=[];
+      list.forEach(function(h){
+        var m=posMetrics(h);
+        if(!m) return;
+        if(m.oiChg!==null) oi.push(m.oiChg);
+        if(m.whale!==null) wh.push(m.whale);
+        if(m.retail!==null) rt.push(m.retail);
+        if(m.whale!==null && m.retail!==null) gap.push(m.whale - m.retail);
+      });
+      function mean(a){ return a.length? a.reduce(function(s,x){return s+x;},0)/a.length : null; }
+      return {oi:mean(oi), wh:mean(wh), rt:mean(rt), gap:mean(gap), n:oi.length};
+    }
+    var w=agg(W), l=agg(L);
+    function f(v,d){ return v===null? "—" : v.toFixed(d===undefined?2:d); }
+    if(!w.n && !l.n) return '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);color:var(--ink-faint)">Position data still loading…</div>';
+    return '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">'+
+      '<b style="color:var(--amber)">◆ POSITION DATA</b> — not price-derived. What traders actually hold:<br>'+
+      '<span style="color:var(--ink-faint)">OI∆ = open-interest change over the 30 min into the signal '+
+      '(<b>negative = longs got liquidated</b> = forced selling exhausted) · '+
+      'Whale = long/short ratio of top-20% traders · Retail = long/short ratio of the crowd · '+
+      'Gap = Whale − Retail (<b>positive = smart money more long than the crowd</b>)</span><br><br>'+
+      '<span style="color:var(--signal)">WIN&nbsp;&nbsp;</span> OI∆ <b>'+f(w.oi,1)+'%</b> · Whale <b>'+f(w.wh)+'</b> · Retail <b>'+f(w.rt)+'</b> · Gap <b>'+f(w.gap)+'</b><br>'+
+      '<span style="color:var(--down)">LOSS</span> OI∆ <b>'+f(l.oi,1)+'%</b> · Whale <b>'+f(l.wh)+'</b> · Retail <b>'+f(l.rt)+'</b> · Gap <b>'+f(l.gap)+'</b>'+
+      '</div>';
   }
 
   // ── portfolio sim: one real $100 account, capital-aware, concurrent positions ──
